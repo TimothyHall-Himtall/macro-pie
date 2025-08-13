@@ -19,7 +19,6 @@
   .btn { appearance: none; border: 1px solid #3a4152; background: #1b2230; color: #e8eaf0; border-radius: 12px; padding: 12px 14px; font-weight: 700; }
   .btn:active { transform: scale(0.99); }
   .btn-lg { font-size: 18px; padding: 16px 18px; }
-  /* High-visibility red Start button */
   .btn-primary { background: #c62828; border-color: #8e0000; color: #ffffff; box-shadow: 0 0 0 1px rgba(0,0,0,0.25) inset; }
   .btn-primary:active { transform: scale(0.98); }
 
@@ -36,23 +35,41 @@
   .warn { color:#f2c56b }
   .err { color:#ff807a }
 
-  /* Badges in a single vertical column */
+  /* Badges stacked vertically (no horizontal scroll) */
   .badges { display:flex; flex-direction: column; gap:8px; align-items: flex-start; }
   .badge { display:inline-flex; align-items:center; gap:6px; padding:8px 12px; border-radius:999px; border:1px solid #3a4152; background:#101522; font-size:13px; max-width: 100%; }
-  .badge.high   { border-color:#ff807a; color:#ff807a; }
-  .badge.keto   { border-color:#6fe28c; color:#6fe28c; }
-  .badge.protein{ border-color:#79d48a; color:#79d48a; }
-  .badge.sugar  { border-color:#ffd54f; color:#ffd54f; }
-  .badge.processed{ border-color:#90caf9; color:#90caf9; }
-  .badge.risk-low    { border-color:#6fe28c; color:#6fe28c; }
-  .badge.risk-med    { border-color:#ffd54f; color:#ffd54f; }
-  .badge.risk-high   { border-color:#ffb74d; color:#ffb74d; }
-  .badge.risk-very   { border-color:#ff807a; color:#ff807a; }
+  .badge.high      { border-color:#ff807a; color:#ff807a; }   /* High sodium */
+  .badge.keto      { border-color:#6fe28c; color:#6fe28c; }   /* Keto ok */
+  .badge.protein   { border-color:#79d48a; color:#79d48a; }   /* High protein */
+  .badge.lowSugar  { border-color:#ffd54f; color:#ffd54f; }   /* Low sugar */
+  .badge.lowSodium { border-color:#90caf9; color:#90caf9; }   /* Low sodium */
+  .badge.highFiber { border-color:#ffb74d; color:#ffb74d; }   /* High fiber */
+  .badge.processed { border-color:#a0a7ff; color:#a0a7ff; }   /* High-Processed (NOVA 4) */
+  .badge.risk-low  { border-color:#6fe28c; color:#6fe28c; }
+  .badge.risk-med  { border-color:#ffd54f; color:#ffd54f; }
+  .badge.risk-high { border-color:#ffb74d; color:#ffb74d; }
+  .badge.risk-very { border-color:#ff807a; color:#ff807a; }
 
   .legend { display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:8px; margin-top:6px; }
   .legend-item { display:flex; align-items:center; gap:8px; font-size:12px; color:#b8c2d8; }
   .swatch { width:12px; height:12px; border-radius:3px; border:1px solid rgba(255,255,255,0.15); }
-  canvas { width: 100%; max-width: 560px; height: auto; }
+
+  /* Chart container with centered overlay for tap-to-toggle info */
+  .chart-wrap { position: relative; width: 100%; max-width: 560px; margin: 0 auto; }
+  canvas { width: 100%; height: auto; }
+  .centerInfo {
+    position: absolute; inset: 0;
+    display: grid; place-items: center;
+    pointer-events: auto; text-align: center;
+  }
+  .centerBubble {
+    padding: 8px 10px; border-radius: 12px;
+    background: rgba(0,0,0,0.25); backdrop-filter: blur(4px);
+    border: 1px solid rgba(255,255,255,0.15);
+    min-width: 120px;
+  }
+  .centerBig { font-size: 22px; font-weight: 800; line-height: 1.05; }
+  .centerSub { font-size: 11px; opacity: 0.9; margin-top: 2px; }
 </style>
 </head>
 <body>
@@ -61,7 +78,6 @@
 
   <section class="card row">
     <div class="grid3">
-      <!-- Bigger, red Start Scan button -->
       <button id="startBtn" class="btn btn-primary btn-lg">📷 Start Scan</button>
       <button id="stopBtn" class="btn" disabled>⏹ Stop</button>
       <button id="torchBtn" class="btn" disabled>🔦 Torch</button>
@@ -107,12 +123,20 @@
       </div>
     </div>
     <div id="productMeta" class="muted"></div>
-    <!-- Stacked badges -->
     <div class="badges" id="badgeRow"></div>
   </section>
 
   <section class="card row">
-    <canvas id="chart"></canvas>
+    <div class="chart-wrap">
+      <canvas id="chart"></canvas>
+      <!-- Tap-to-toggle center info -->
+      <div id="centerInfo" class="centerInfo" title="Tap to toggle">
+        <div class="centerBubble">
+          <div id="centerBig" class="centerBig">—</div>
+          <div id="centerSub" class="centerSub">—</div>
+        </div>
+      </div>
+    </div>
     <div id="macroText" class="mono small"></div>
 
     <!-- Legend (fixed colors) -->
@@ -129,13 +153,7 @@
       <div class="legend-item"><span class="swatch" style="background:#79d48a"></span>Protein (Pr)</div>
     </div>
 
-    <div class="small">Fats split into MUFA (M), PUFA (P), Saturated (S), Trans (T), and Other (F). Carbs split into Fiber (Fi), Sugar natural (Su), Added (A), and Other (C).</div>
-  </section>
-
-  <section class="card">
-    <div class="small">
-      Data: Open Food Facts. “Other carbs” = total carbs − fiber − total sugars (≥0). “Sugar (natural)” = total sugars − added sugars (≥0). Net carbs ≈ total carbs − fiber − sugar alcohols (polyols). Sodium “High” at ≥460 mg per selected basis. Badges and risk score are **heuristics for education**, not medical advice.
-    </div>
+    <div class="small">Heuristics are educational only. “Other carbs” = total carbs − fiber − total sugars (≥0). “Sugar (natural)” = total sugars − added sugars (≥0). Net carbs ≈ total carbs − fiber − polyols. High-Processed = NOVA 4.</div>
   </section>
 
 </main>
@@ -144,7 +162,7 @@
 <script src="https://unpkg.com/@zxing/browser@latest"></script>
 <!-- Chart.js -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-<!-- Chart.js datalabels for letters in slices -->
+<!-- Chart.js datalabels -->
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0"></script>
 <script>
 /* ======= Elements ======= */
@@ -163,6 +181,9 @@ const productMeta = document.getElementById('productMeta');
 const badgeRow = document.getElementById('badgeRow');
 const chartEl = document.getElementById('chart');
 const macroText = document.getElementById('macroText');
+const centerInfo = document.getElementById('centerInfo');
+const centerBig = document.getElementById('centerBig');
+const centerSub = document.getElementById('centerSub');
 
 /* ======= State ======= */
 let mediaStream = null;
@@ -172,6 +193,10 @@ let zxControls = null;
 let detectLoopRunning = false;
 let hasTorch = false, torchOn = false;
 let chart = null;
+
+let lastParts = null;    // last computed nutrient parts (for center toggle)
+let lastRisk = null;     // last cancer-risk heuristic
+let centerMode = 0;      // 0=Calories, 1=Net Carbs, 2=Risk
 
 /* ======= UI helpers ======= */
 function setStatus(msg, cls='') {
@@ -227,7 +252,18 @@ function kcalFromMacros({fat, protein, fiber, sugarsTotal, otherCarbs}) {
   return Math.round(fat*9 + protein*4 + (sugarsTotal+otherCarbs)*4 + fiber*2);
 }
 
-/* ======= Badges: sodium, keto, high-protein, low-sugar, processed ======= */
+/* ======= Slice kcal for percent labels ======= */
+function sliceKcal(parts, key) {
+  // fat subtypes → 9 kcal/g; carbs (sugars/otherCarbs) → 4; fiber → 2; protein → 4
+  const g = parts[key] || 0;
+  if (['mufa','pufa','otherFat','sat','trans'].includes(key)) return g*9;
+  if (['sugarNatural','addedSugars','otherCarbs'].includes(key)) return g*4;
+  if (key === 'fiber') return g*2;
+  if (key === 'protein') return g*4;
+  return 0;
+}
+
+/* ======= Badges (show only when triggered) ======= */
 function getSodiumMg(n, per) {
   const sodium = per==='serving' ? grams(n['sodium_serving']) : grams(n['sodium_100g']);
   const salt = per==='serving' ? grams(n['salt_serving']) : grams(n['salt_100g']);
@@ -235,23 +271,36 @@ function getSodiumMg(n, per) {
   if (salt) return salt * 0.393 * 1000;
   return 0;
 }
-function renderBadges({ sodiumMg, netCarbs, basisLabel, proteinG, sugarsG, novaGroup }) {
-  const HIGH_SODIUM_MG = 460;
-  const HIGH_PROTEIN_SERV = 20, HIGH_PROTEIN_100G = 10;
-  const LOW_SUGAR_THR = 5;
 
-  const items = [];
-  items.push(`<span class="badge${sodiumMg>=HIGH_SODIUM_MG?' high':''}">🧂 Sodium: ${Math.round(sodiumMg)} mg${sodiumMg>=HIGH_SODIUM_MG?' • High':''}</span>`);
-  items.push(`<span class="badge${netCarbs<=5?' keto':''}">🥑 Keto-Friendly: ${toFixed1(netCarbs)} g net ${basisLabel}</span>`);
-  const isHighProtein = (basisLabel.includes('100 g') ? proteinG>=HIGH_PROTEIN_100G : proteinG>=HIGH_PROTEIN_SERV);
-  items.push(`<span class="badge${isHighProtein?' protein':''}">🥩 High Protein: ${toFixed1(proteinG)} g ${basisLabel}</span>`);
-  const isLowSugar = sugarsG <= LOW_SUGAR_THR;
-  items.push(`<span class="badge${isLowSugar?' sugar':''}">🍬 Low Sugar: ${toFixed1(sugarsG)} g ${basisLabel}</span>`);
-  if (novaGroup) {
-    const processed = Number(novaGroup) === 4;
-    items.push(`<span class="badge${processed?' processed':''}">🏭 ${processed ? 'Highly-Processed (NOVA 4)' : 'Processing: NOVA '+novaGroup}</span>`);
-  }
-  badgeRow.innerHTML = items.join('');
+function renderBadgesTriggered({ sodiumMg, basis, netCarbs, proteinG, sugarsG, fiberG, novaGroup }) {
+  const list = [];
+
+  // High Sodium ≥ 460 mg (serving) or ≥ 600 mg (per 100 g)
+  const HIGH_SODIUM = basis==='serving' ? 460 : 600;
+  if (sodiumMg >= HIGH_SODIUM) list.push(`<span class="badge high">🧂 High Sodium: ${Math.round(sodiumMg)} mg ${basis==='serving'?'(per serving)':'(per 100 g)'}</span>`);
+
+  // Low Sodium ≤ 140 mg (serving) or ≤ 120 mg (per 100 g)
+  const LOW_SODIUM = basis==='serving' ? 140 : 120;
+  if (sodiumMg > 0 && sodiumMg <= LOW_SODIUM) list.push(`<span class="badge lowSodium">🧂 Low Sodium: ${Math.round(sodiumMg)} mg ${basis==='serving'?'(per serving)':'(per 100 g)'}</span>`);
+
+  // Keto-Friendly net carbs ≤ 5 g
+  if (netCarbs <= 5) list.push(`<span class="badge keto">🥑 Keto-Friendly: ${toFixed1(netCarbs)} g net ${basis==='serving'?'(per serving)':'(per 100 g)'}</span>`);
+
+  // High Protein ≥20 g (serv) or ≥10 g (100 g)
+  const isHighProtein = basis==='serving' ? (proteinG>=20) : (proteinG>=10);
+  if (isHighProtein) list.push(`<span class="badge protein">🥩 High Protein: ${toFixed1(proteinG)} g ${basis==='serving'?'(per serving)':'(per 100 g)'}</span>`);
+
+  // Low Sugar ≤5 g total sugars (per basis)
+  if (sugarsG >= 0 && sugarsG <= 5) list.push(`<span class="badge lowSugar">🍬 Low Sugar: ${toFixed1(sugarsG)} g ${basis==='serving'?'(per serving)':'(per 100 g)'}</span>`);
+
+  // High Fiber ≥5 g (serv) or ≥2.5 g (100 g)
+  const isHighFiber = basis==='serving' ? (fiberG>=5) : (fiberG>=2.5);
+  if (isHighFiber) list.push(`<span class="badge highFiber">🌾 High Fiber: ${toFixed1(fiberG)} g ${basis==='serving'?'(per serving)':'(per 100 g)'}</span>`);
+
+  // High-Processed (NOVA 4)
+  if (novaGroup && Number(novaGroup) === 4) list.push(`<span class="badge processed">🏭 High-Processed (NOVA 4)</span>`);
+
+  badgeRow.innerHTML = list.join('');
 }
 
 /* ======= Cancer-risk heuristic (0–10, educational only) ======= */
@@ -266,10 +315,11 @@ function computeCancerRiskHeuristic(product) {
 
   let score = 0;
   if (nova === 4) score += 3; else if (nova === 3) score += 1;
-  score += Math.min(2, Math.max(0, added100 / 5));
+  score += Math.min(2, Math.max(0, (added100||0) / 5));
   if (trans100 && trans100 > 0) score += 2;
   if (sodium100_mg >= 1200) score += 2; else if (sodium100_mg >= 600) score += 1;
   if (fiber100 < 1) score += 2; else if (fiber100 < 3) score += 1;
+
   const ing = (product.ingredients_text || '').toLowerCase();
   if (/\bnitrite\b|\bnitrate\b|sodium nitrite|potassium nitrite|sodium nitrate|potassium nitrate/.test(ing)) score += 1;
 
@@ -283,10 +333,11 @@ function computeCancerRiskHeuristic(product) {
 function renderCancerRiskBadge(risk) {
   const cls = risk.band === 'very' ? 'risk-very' : risk.band === 'high' ? 'risk-high' : risk.band === 'med' ? 'risk-med' : 'risk-low';
   const html = `<span class="badge ${cls}">🎯 Cancer-Risk Heuristic: ${risk.score} / 10</span>`;
-  badgeRow.innerHTML += (badgeRow.innerHTML ? '' : '') + html;
+  // Always show risk badge (it's informational, not neutral)
+  if (badgeRow.innerHTML) badgeRow.innerHTML += html; else badgeRow.innerHTML = html;
 }
 
-/* ======= Chart (fixed colors + bigger letters) ======= */
+/* ======= Chart (fixed colors + letters+percent) ======= */
 const COLORS = {
   mufa: '#a8d8ff', pufa: '#7fc6ff', otherFat: '#5fb0ff', sat: '#3f8efc', trans: '#1f6fe6',
   fiber: '#ffa726', sugarNatural: '#ffe082', added: '#ffca28', otherCarbs: '#fff59d',
@@ -312,6 +363,12 @@ function updateChart(label, parts) {
   if (chart) chart.destroy();
   Chart.register(ChartDataLabels);
 
+  const totalKcal = kcalFromMacros(parts);
+  const slicePercents = SLICE_KEYS.map(k => {
+    const sk = sliceKcal(parts, k);
+    return totalKcal > 0 ? Math.round((sk / totalKcal) * 100) : 0;
+  });
+
   chart = new Chart(chartEl, {
     type: 'doughnut',
     data: { labels: SLICE_LABELS, datasets: [{ data, backgroundColor: SLICE_COLORS }] },
@@ -322,11 +379,15 @@ function updateChart(label, parts) {
         legend: { display: false },
         title: { display: true, text: label },
         datalabels: {
-          formatter: (value, ctx) => (!value || value < 0.5) ? '' : SLICE_LETTERS[ctx.dataIndex],
-          font: { weight: 800, size: 15 },           /* bigger letters */
+          formatter: (value, ctx) => {
+            const pct = slicePercents[ctx.dataIndex] || 0;
+            if (!value || pct < 2) return ''; // hide tiny slices <2% to reduce clutter
+            return `${SLICE_LETTERS[ctx.dataIndex]} ${pct}%`;
+          },
+          font: { weight: 800, size: 14 },
           color: (ctx) => isDark(SLICE_COLORS[ctx.dataIndex]) ? '#ffffff' : '#0b0d12',
           textStrokeColor: '#000000',
-          textStrokeWidth: 1,                         /* thicker outline for contrast */
+          textStrokeWidth: 1,
           clamp: true,
           clip: false
         }
@@ -334,14 +395,38 @@ function updateChart(label, parts) {
     }
   });
 
-  const kcal = kcalFromMacros(parts);
+  const kcal = totalKcal;
   macroText.textContent =
 `Protein:      ${toFixed1(parts.protein)} g
 FAT → MUFA:   ${toFixed1(parts.mufa)} g • PUFA: ${toFixed1(parts.pufa)} g • Sat: ${toFixed1(parts.sat)} g • Trans: ${toFixed1(parts.trans)} g • Other: ${toFixed1(parts.otherFat)} g
 CARBS → Fiber:${toFixed1(parts.fiber)} g • Sugar (natural): ${toFixed1(parts.sugarNatural)} g • Added: ${toFixed1(parts.addedSugars)} g • Other: ${toFixed1(parts.otherCarbs)} g
 -----------------------------------------
 Est. calories: ${kcal} kcal`;
+
+  // Set default center (Calories)
+  lastParts = parts;
+  setCenterContent(0, kcal); // 0 = Calories
 }
+
+/* ======= Center info toggle ======= */
+function setCenterContent(mode, kcalValue) {
+  centerMode = mode % 3;
+  if (!lastParts) { centerBig.textContent = '—'; centerSub.textContent = '—'; return; }
+
+  if (centerMode === 0) {
+    centerBig.textContent = String(kcalValue ?? kcalFromMacros(lastParts));
+    centerSub.textContent = 'kcal (tap to toggle)';
+  } else if (centerMode === 1) {
+    const netCarbs = Math.max((lastParts.carbs||0) - (lastParts.fiber||0) - (lastParts.polyols||0), 0);
+    centerBig.textContent = `${toFixed1(netCarbs)} g`;
+    centerSub.textContent = 'Net Carbs (tap to toggle)';
+  } else {
+    const s = lastRisk ? lastRisk.score : '—';
+    centerBig.textContent = `${s}`;
+    centerSub.textContent = 'Cancer Risk (tap to toggle)';
+  }
+}
+centerInfo.addEventListener('click', () => setCenterContent(centerMode+1));
 
 /* ======= Fetch & render ======= */
 async function fetchOFF(code) {
@@ -378,21 +463,28 @@ async function doLookup(raw) {
   setMeta(p, preferred);
 
   const parts = pickNutriments(p.nutriments || {}, preferred);
+  lastRisk = computeCancerRiskHeuristic(p);
+
   const sodiumMg = getSodiumMg(p.nutriments || {}, preferred);
   const netCarbs = Math.max(parts.carbs - parts.fiber - (parts.polyols || 0), 0);
-  const basisLabel = preferred === 'serving' ? '(per serving)' : '(per 100 g)';
 
-  renderBadges({ sodiumMg, netCarbs, basisLabel, proteinG: parts.protein, sugarsG: parts.sugarsTotal, novaGroup: p.nova_group });
-
-  const risk = computeCancerRiskHeuristic(p);
-  renderCancerRiskBadge(risk);
+  renderBadgesTriggered({
+    sodiumMg,
+    basis: preferred,
+    netCarbs,
+    proteinG: parts.protein,
+    sugarsG: parts.sugarsTotal,
+    fiberG: parts.fiber,
+    novaGroup: p.nova_group
+  });
+  renderCancerRiskBadge(lastRisk);
 
   const label = `${(p.brands||'').split(',')[0] ?? ''} ${(p.product_name||'')}`.trim() || 'Product';
   updateChart(label, parts);
   setStatus('Product found ✔︎', 'ok');
 }
 
-/* ======= Camera & scanning (iOS-friendly) ======= */
+/* ======= Camera & scanning ======= */
 const BARCODE_FORMATS = ['ean_13','ean_8','upc_a','upc_e','code_128'];
 
 async function startCamera() {
@@ -507,10 +599,9 @@ async function startZXing() {
 }
 
 /* ======= Events ======= */
-startBtn.addEventListener('click', async () => {
-  startBtn.disabled = true; stopBtn.disabled = false;
-  try { await startCamera(); } catch (_) { startBtn.disabled = false; stopBtn.disabled = true; }
-});
+const centerWrap = document.querySelector('.chart-wrap');
+centerInfo.addEventListener('click', () => setCenterContent(centerMode+1));
+startBtn.addEventListener('click', async () => { startBtn.disabled = true; stopBtn.disabled = false; try { await startCamera(); } catch (_) { startBtn.disabled = false; stopBtn.disabled = true; }});
 stopBtn.addEventListener('click', async () => { await stopCamera(); startBtn.disabled = false; stopBtn.disabled = true; torchBtn.disabled = true; });
 torchBtn.addEventListener('click', async () => { if (hasTorch) await setTorch(!torchOn); });
 zoomRange.addEventListener('input', async (e) => { await setZoom(e.target.value); });
