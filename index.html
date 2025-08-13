@@ -19,13 +19,21 @@
   .btn:active { transform: scale(0.99); }
   video { width: 100%; border-radius: 12px; background: #0b0d12; }
   label { font-size: 13px; color: #a8b0c2; }
-  select, input[type="text"] { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #3a4152; background: #0f1320; color: #e8eaf0; }
+  select, input[type="text"], input[type="range"] { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #3a4152; background: #0f1320; color: #e8eaf0; }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
   .muted { color: #9aa3b6; font-size: 13px; }
-  .pill { display:inline-block; padding: 6px 10px; border-radius: 999px; border: 1px solid #2a2f3a; background:#101522; font-size:12px; color:#b4bed1 }
-  canvas { width: 100%; max-width: 520px; height: auto; }
   .small { font-size: 12px; color: #93a0b6; }
-  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre; }
+  .ok { color:#6fe28c }
+  .warn { color:#f2c56b }
+  .err { color:#ff807a }
+  .badge { display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:999px; border:1px solid #3a4152; background:#101522; font-size:12px; }
+  .badge.high { border-color:#ff807a; color:#ff807a; }
+  .legend { display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:8px; margin-top:6px; }
+  .legend-item { display:flex; align-items:center; gap:8px; font-size:12px; color:#b8c2d8; }
+  .swatch { width:12px; height:12px; border-radius:3px; border:1px solid rgba(255,255,255,0.15); }
+  canvas { width: 100%; max-width: 560px; height: auto; }
 </style>
 </head>
 <body>
@@ -33,22 +41,35 @@
 <main>
 
   <section class="card row">
-    <div class="grid2">
-      <button id="startBtn" class="btn">📷 Start Camera Scan</button>
+    <div class="grid3">
+      <button id="startBtn" class="btn">📷 Start Scan</button>
       <button id="stopBtn" class="btn" disabled>⏹ Stop</button>
+      <button id="torchBtn" class="btn" disabled>🔦 Torch</button>
     </div>
     <video id="preview" playsinline></video>
     <div class="grid2">
       <div>
+        <label>Zoom</label>
+        <input id="zoomRange" type="range" min="1" max="1" step="0.1" value="1" disabled />
+      </div>
+      <div>
+        <label class="small">Pinch on video to zoom</label>
+        <div id="zoomLabel" class="small mono"></div>
+      </div>
+    </div>
+    <div id="status" class="mono small"></div>
+
+    <div class="grid2">
+      <div>
         <label>Or enter a barcode (UPC/EAN)</label>
-        <input id="barcodeInput" type="text" inputmode="numeric" placeholder="e.g., 041196910184" />
+        <input id="barcodeInput" type="text" inputmode="numeric" placeholder="e.g., 036000291452" />
       </div>
       <div>
         <label>&nbsp;</label>
         <button id="lookupBtn" class="btn">🔎 Look Up</button>
       </div>
     </div>
-    <div class="small">Tip: Good lighting + fill most of the frame with the barcode.</div>
+    <div class="small">Tips: Use the torch in dim light. Zoom until the barcode fills most of the frame. Hold steady 1–2s.</div>
   </section>
 
   <section class="card row">
@@ -66,178 +87,439 @@
       </div>
     </div>
     <div id="productMeta" class="muted"></div>
+    <div id="sodiumBadge"></div>
   </section>
 
   <section class="card row">
     <canvas id="chart"></canvas>
     <div id="macroText" class="mono small"></div>
-    <div class="small">Slices: Fat, Protein, <span class="pill">Fiber</span>, <span class="pill">Added Sugar</span>, Other Carbs.</div>
+
+    <!-- Legend (fixed colors) -->
+    <div class="legend">
+      <div class="legend-item"><span class="swatch" style="background:#a8d8ff"></span>Monounsaturated fat</div>
+      <div class="legend-item"><span class="swatch" style="background:#ffe082"></span>Sugar (natural)</div>
+      <div class="legend-item"><span class="swatch" style="background:#7fc6ff"></span>Polyunsaturated fat</div>
+      <div class="legend-item"><span class="swatch" style="background:#ffca28"></span>Added sugar</div>
+      <div class="legend-item"><span class="swatch" style="background:#5fb0ff"></span>Other fat</div>
+      <div class="legend-item"><span class="swatch" style="background:#fff59d"></span>Other carbs</div>
+      <div class="legend-item"><span class="swatch" style="background:#3f8efc"></span>Saturated fat</div>
+      <div class="legend-item"><span class="swatch" style="background:#ffa726"></span>Fiber</div>
+      <div class="legend-item"><span class="swatch" style="background:#1f6fe6"></span>Trans fat</div>
+      <div class="legend-item"><span class="swatch" style="background:#79d48a"></span>Protein</div>
+    </div>
+
+    <div class="small">Fats are split into MUFA, PUFA, Saturated, Trans, and “Other fat”. Carbs are split into Fiber, Sugar (natural), Added sugar, and Other carbs.</div>
   </section>
 
   <section class="card">
-    <div class="small">
-      Data source: Open Food Facts (public). If “added sugar” isn’t reported, it’s treated as 0 and carbs are split as: other carbs = total carbs − fiber − added sugar (never negative).
-    </div>
+    <div class="small">Data: Open Food Facts. “Other carbs” = total carbs − fiber − total sugars (never negative). “Sugar (natural)” = total sugars − added sugars (never negative). Sodium “High” flag shows at ≥460 mg per basis (≈20% DV).</div>
   </section>
 
 </main>
 
-<!-- ZXing barcode scanner -->
+<!-- ZXing fallback -->
 <script src="https://unpkg.com/@zxing/browser@latest"></script>
 <!-- Chart.js -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <script>
+/* ======= Elements ======= */
 const video = document.getElementById('preview');
 const startBtn = document.getElementById('startBtn');
 const stopBtn = document.getElementById('stopBtn');
-const lookupBtn = document.getElementById('lookupBtn');
+const torchBtn = document.getElementById('torchBtn');
+const zoomRange = document.getElementById('zoomRange');
+const zoomLabel = document.getElementById('zoomLabel');
+const statusEl = document.getElementById('status');
 const barcodeInput = document.getElementById('barcodeInput');
+const lookupBtn = document.getElementById('lookupBtn');
 const basisSel = document.getElementById('basis');
 const servingText = document.getElementById('servingText');
 const productMeta = document.getElementById('productMeta');
+const sodiumBadge = document.getElementById('sodiumBadge');
 const chartEl = document.getElementById('chart');
-let codeReader;
-let currentControls;
-let chart;
+const macroText = document.getElementById('macroText');
 
+/* ======= State ======= */
+let mediaStream = null;
+let track = null;
+let zxReader = null;
+let zxControls = null;
+let detectLoopRunning = false;
+let hasTorch = false, torchOn = false;
+let chart = null;
+
+/* ======= UI helpers ======= */
+function setStatus(msg, cls='') {
+  statusEl.textContent = msg;
+  statusEl.className = 'mono small ' + cls;
+}
 function grams(val){ return typeof val === 'number' ? val : (val ? parseFloat(val) : 0); }
+function toFixed1(n){ return (Math.round(n*10)/10).toFixed(1); }
 
+/* ======= Barcode helpers ======= */
+function normalizeBarcodes(raw) {
+  const code = (raw || '').replace(/\D/g,'');
+  if (!code) return [];
+  const list = new Set([code]);
+  if (code.length === 12) list.add('0'+code); // UPC-A -> EAN-13
+  if (code.length === 13 && code.startsWith('0')) list.add(code.slice(1)); // EAN-13 -> UPC-A
+  return Array.from(list);
+}
+
+/* ======= Nutrition extraction ======= */
 function pickNutriments(n, per) {
-  // names as they appear in OFF “nutriments”
-  const fields = {
-    fat: per==='serving' ? 'fat_serving' : 'fat_100g',
-    protein: per==='serving' ? 'proteins_serving' : 'proteins_100g',
-    carbs: per==='serving' ? 'carbohydrates_serving' : 'carbohydrates_100g',
-    fiber: per==='serving' ? 'fiber_serving' : 'fiber_100g',
-    sugars: per==='serving' ? 'sugars_serving' : 'sugars_100g',
-    added: per==='serving' ? 'added-sugars_serving' : 'added-sugars_100g'
+  const f = (k) => grams(n[k]);
+  const get = (base, servingKey, g100Key) => per==='serving' ? f(servingKey) : f(g100Key);
+
+  // Totals
+  const fat = get(n, 'fat_serving', 'fat_100g');
+  const protein = get(n, 'proteins_serving', 'proteins_100g');
+  const carbs = get(n, 'carbohydrates_serving', 'carbohydrates_100g');
+  const fiber = get(n, 'fiber_serving', 'fiber_100g');
+  const sugarsTotal = get(n, 'sugars_serving', 'sugars_100g');
+  const addedSugars = get(n, 'added-sugars_serving', 'added-sugars_100g');
+
+  // Fat subtypes (OFF keys)
+  const sat = get(n, 'saturated-fat_serving', 'saturated-fat_100g');
+  // Some datasets may use trans-fat or transfat; try both
+  const trans = get(n, 'trans-fat_serving', 'trans-fat_100g') || get(n, 'transfat_serving','transfat_100g');
+  const mufa = get(n, 'monounsaturated-fat_serving', 'monounsaturated-fat_100g');
+  const pufa = get(n, 'polyunsaturated-fat_serving', 'polyunsaturated-fat_100g');
+
+  // Derived
+  const otherFat = Math.max(fat - (mufa + pufa + sat + trans), 0);
+  const sugarNatural = Math.max(sugarsTotal - addedSugars, 0);
+  const otherCarbs = Math.max(carbs - fiber - sugarsTotal, 0);
+
+  return {
+    fat, protein, carbs, fiber, sugarsTotal, addedSugars, sugarNatural, otherCarbs,
+    mufa, pufa, sat, trans, otherFat
   };
-  const fat = grams(n[fields.fat]);
-  const protein = grams(n[fields.protein]);
-  const carbs = grams(n[fields.carbs]);
-  const fiber = grams(n[fields.fiber]);
-  const addedSugar = grams(n[fields.added]); // may be 0 if not present
-  // ensure “other carbs” never negative
-  const otherCarbs = Math.max(carbs - fiber - addedSugar, 0);
-  return { fat, protein, fiber, addedSugar, otherCarbs, carbsTotal: carbs };
 }
 
-function kcalFromMacros({fat, protein, fiber, addedSugar, otherCarbs}) {
-  // standard factors: fat 9, protein 4, carbs 4, fiber often counted 2 (varies).
-  // We’ll treat fiber as 2 kcal/g to avoid inflating totals.
-  const kcals = fat*9 + protein*4 + (addedSugar+otherCarbs)*4 + fiber*2;
-  return Math.round(kcals);
+function kcalFromMacros({fat, protein, fiber, sugarsTotal, otherCarbs}) {
+  // Energy factors: fat 9, protein 4, carbs 4, fiber 2 (to avoid inflating totals)
+  return Math.round(fat*9 + protein*4 + (sugarsTotal+otherCarbs)*4 + fiber*2);
 }
 
-function updateChart(label, macros) {
-  const data = [macros.fat, macros.protein, macros.fiber, macros.addedSugar, macros.otherCarbs];
-  const labels = ['Fat (g)','Protein (g)','Fiber (g)','Added Sugar (g)','Other Carbs (g)'];
+/* ======= Sodium & badge ======= */
+function getSodiumMg(n, per) {
+  // OFF may provide sodium OR salt. If only salt provided, sodium ≈ salt * 0.393.
+  const sodium = per==='serving' ? grams(n['sodium_serving']) : grams(n['sodium_100g']);
+  const salt = per==='serving' ? grams(n['salt_serving']) : grams(n['salt_100g']);
+  if (sodium) return sodium * 1000;
+  if (salt) return salt * 0.393 * 1000;
+  return 0;
+}
+function renderSodiumBadge(mg) {
+  const HIGH_THRESHOLD = 460; // mg per basis (~20% DV)
+  const isHigh = mg >= HIGH_THRESHOLD;
+  const html = `<span class="badge ${isHigh ? 'high' : ''}">
+    🧂 Sodium: ${Math.round(mg)} mg ${isHigh ? '• High' : ''}
+  </span>`;
+  sodiumBadge.innerHTML = html;
+}
+
+/* ======= Chart (fixed colors as requested) ======= */
+const COLORS = {
+  // Fats (all blue family)
+  mufa: '#a8d8ff',        // light blue
+  pufa: '#7fc6ff',        // light-medium blue
+  otherFat: '#5fb0ff',    // medium blue
+  sat: '#3f8efc',         // medium-dark blue
+  trans: '#1f6fe6',       // dark blue
+  // Carbs
+  fiber: '#ffa726',       // orange
+  sugarNatural: '#ffe082',// yellow
+  added: '#ffca28',       // dark yellow
+  otherCarbs: '#fff59d',  // light yellow
+  // Protein
+  protein: '#79d48a'      // green
+};
+
+function updateChart(label, parts) {
+  const data = [
+    parts.mufa, parts.pufa, parts.otherFat, parts.sat, parts.trans,
+    parts.fiber, parts.sugarNatural, parts.addedSugars, parts.otherCarbs,
+    parts.protein
+  ];
+  const labels = [
+    'Monounsaturated fat (g)',
+    'Polyunsaturated fat (g)',
+    'Other fat (g)',
+    'Saturated fat (g)',
+    'Trans fat (g)',
+    'Fiber (g)',
+    'Sugar (natural) (g)',
+    'Added sugar (g)',
+    'Other carbs (g)',
+    'Protein (g)'
+  ];
+  const bg = [
+    COLORS.mufa, COLORS.pufa, COLORS.otherFat, COLORS.sat, COLORS.trans,
+    COLORS.fiber, COLORS.sugarNatural, COLORS.added, COLORS.otherCarbs,
+    COLORS.protein
+  ];
   if (chart) chart.destroy();
   chart = new Chart(chartEl, {
-    type: 'pie',
-    data: { labels, datasets: [{ data }] },
+    type: 'doughnut',
+    data: { labels, datasets: [{ data, backgroundColor: bg }] },
     options: {
       responsive: true,
+      cutout: '45%',
       plugins: {
-        legend: { position: 'bottom', labels: { boxWidth: 12 } },
+        legend: { display: false },
         title: { display: true, text: label }
       }
     }
   });
-  const kcal = kcalFromMacros(macros);
-  const text =
-`Fat:          ${macros.fat.toFixed(1)} g
-Protein:      ${macros.protein.toFixed(1)} g
-Fiber:        ${macros.fiber.toFixed(1)} g
-Added sugar:  ${macros.addedSugar.toFixed(1)} g
-Other carbs:  ${macros.otherCarbs.toFixed(1)} g
------------------------------
+  const kcal = kcalFromMacros(parts);
+  macroText.textContent =
+`Protein:      ${toFixed1(parts.protein)} g
+FAT → MUFA:   ${toFixed1(parts.mufa)} g • PUFA: ${toFixed1(parts.pufa)} g • Sat: ${toFixed1(parts.sat)} g • Trans: ${toFixed1(parts.trans)} g • Other: ${toFixed1(parts.otherFat)} g
+CARBS → Fiber:${toFixed1(parts.fiber)} g • Sugar (natural): ${toFixed1(parts.sugarNatural)} g • Added: ${toFixed1(parts.addedSugars)} g • Other: ${toFixed1(parts.otherCarbs)} g
+-----------------------------------------
 Est. calories: ${kcal} kcal`;
-  document.getElementById('macroText').textContent = text;
 }
 
-async function fetchProduct(barcode) {
-  const url = `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(barcode)}.json`;
+/* ======= Fetch & render ======= */
+async function fetchOFF(code) {
+  const url = `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json`;
   const res = await fetch(url, { cache: 'no-store' });
-  if (!res.ok) throw new Error('Lookup failed');
+  if (!res.ok) throw new Error('Network error');
   const j = await res.json();
-  if (!j || j.status !== 1 || !j.product) throw new Error('Product not found');
+  if (!j || j.status !== 1 || !j.product) return null;
   return j.product;
 }
-
-function setMeta(p) {
+async function lookupAny(rawCode) {
+  const tries = normalizeBarcodes(rawCode);
+  for (const c of tries) {
+    const p = await fetchOFF(c);
+    if (p) return p;
+  }
+  return null;
+}
+function setMeta(p, per) {
   const brand = p.brands || '';
   const name = p.product_name || p.generic_name || 'Unnamed product';
   const serving = p.serving_size || '';
-  const base = basisSel.value;
   servingText.value = serving || servingText.value;
   productMeta.innerHTML = `
     <div><strong>${brand ? brand + ' — ' : ''}${name}</strong></div>
     <div class="small">Barcode: ${p.code}</div>
-    <div class="small">Nutrition basis: <code>${base === 'serving' ? 'per serving' : 'per 100g'}</code>${serving ? ` • Serving size: <code>${serving}</code>` : ''}</div>
+    <div class="small">Nutrition basis: <code>${per === 'serving' ? 'per serving' : 'per 100g'}</code>${serving ? ` • Serving size: <code>${serving}</code>` : ''}</div>
   `;
 }
-
-async function handleBarcodeFound(code) {
-  stopScan();
-  barcodeInput.value = code;
-  await lookup(code);
+async function doLookup(raw) {
+  setStatus('Looking up product…', 'warn');
+  productMeta.textContent = ''; sodiumBadge.innerHTML = '';
+  const p = await lookupAny(raw);
+  if (!p) {
+    setStatus('No product found for that code on Open Food Facts.', 'err');
+    return;
+  }
+  const preferred = (basisSel.value === 'serving' && p.nutrition_data_per === 'serving')
+    ? 'serving'
+    : (basisSel.value === '100g' ? '100g' : (p.nutrition_data_per === '100g' ? '100g' : 'serving'));
+  setMeta(p, preferred);
+  const parts = pickNutriments(p.nutriments || {}, preferred);
+  const sodiumMg = getSodiumMg(p.nutriments || {}, preferred);
+  renderSodiumBadge(sodiumMg);
+  const label = `${(p.brands||'').split(',')[0] ?? ''} ${(p.product_name||'')}`.trim() || 'Product';
+  updateChart(label, parts);
+  setStatus('Product found ✔︎', 'ok');
 }
 
-async function lookup(code) {
+/* ======= Camera & scanning (iOS 18.6-ready) ======= */
+const BARCODE_FORMATS = ['ean_13','ean_8','upc_a','upc_e','code_128'];
+
+async function startCamera() {
+  if (mediaStream) return;
+  setStatus('Requesting camera…', 'warn');
   try {
-    productMeta.textContent = 'Looking up product…';
-    const p = await fetchProduct(code);
-    setMeta(p);
-    const per = basisSel.value === 'serving' && p.nutrition_data_per === 'serving' ? 'serving' : (basisSel.value === '100g' ? '100g' : (p.nutrition_data_per === '100g' ? '100g' : 'serving'));
-    const macros = pickNutriments(p.nutriments || {}, per);
-    const label = `${(p.brands||'').split(',')[0] ?? ''} ${(p.product_name||'')}`.trim() || 'Product';
-    updateChart(label, macros);
+    mediaStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+        advanced: [{ focusMode: 'continuous' }]
+      },
+      audio: false
+    });
+    video.srcObject = mediaStream;
+    await video.play();
+    setStatus('Camera started. Scanning…', 'ok');
+
+    track = mediaStream.getVideoTracks()[0];
+    const caps = track.getCapabilities ? track.getCapabilities() : {};
+
+    // Torch
+    hasTorch = !!caps.torch;
+    torchBtn.disabled = !hasTorch;
+    torchBtn.textContent = hasTorch ? '🔦 Torch (Off)' : '🔦 Torch N/A';
+
+    // Zoom
+    if (caps.zoom && typeof caps.zoom.min === 'number') {
+      zoomRange.min = caps.zoom.min;
+      zoomRange.max = caps.zoom.max;
+      zoomRange.step = caps.zoom.step || 0.1;
+      zoomRange.value = caps.zoom.min;
+      zoomRange.disabled = false;
+      zoomLabel.textContent = `Zoom: ${Number(zoomRange.value).toFixed(1)}×`;
+    } else {
+      zoomRange.disabled = true;
+      zoomLabel.textContent = 'Zoom: N/A';
+    }
+
+    // Prefer native BarcodeDetector on iOS 16+; fallback to ZXing
+    const usedNative = await loopBarcodeDetector();
+    if (!usedNative) {
+      setStatus('Using ZXing fallback…', 'warn');
+      await startZXing();
+    } else {
+      setStatus('Using native scanner…', 'ok');
+    }
   } catch (e) {
-    productMeta.innerHTML = `<span class="small">⚠️ ${e.message}. You can type the barcode manually above.</span>`;
+    setStatus('Camera start failed. Ensure HTTPS and camera permission in Settings > Safari.', 'err');
+    throw e;
   }
 }
 
-async function startScan() {
+async function stopCamera() {
+  if (detectLoopRunning) detectLoopRunning = false;
+  if (zxControls) { zxControls.stop(); zxControls = null; }
+  if (zxReader) { try { zxReader.reset(); } catch(e){} zxReader = null; }
+  if (video) { try { video.pause(); } catch(e){} }
+  if (track) {
+    try { await setTorch(false); } catch(_) {}
+    track = null;
+  }
+  if (mediaStream) {
+    mediaStream.getTracks().forEach(t => t.stop());
+    mediaStream = null;
+  }
+  setStatus('Camera stopped.', 'warn');
+}
+
+async function setTorch(on) {
+  if (!track || !hasTorch) return false;
   try {
-    startBtn.disabled = true;
-    stopBtn.disabled = false;
+    await track.applyConstraints({ advanced: [{ torch: !!on }] });
+    torchOn = !!on;
+    torchBtn.textContent = torchOn ? '🔦 Torch (On)' : '🔦 Torch (Off)';
+    return true;
+  } catch {
+    setStatus('Torch not supported on this camera.', 'err');
+    return false;
+  }
+}
+async function setZoom(val) {
+  if (!track) return;
+  try {
+    await track.applyConstraints({ advanced: [{ zoom: Number(val) }] });
+    zoomLabel.textContent = `Zoom: ${Number(val).toFixed(1)}×`;
+  } catch { /* ignore */ }
+}
 
-    codeReader = new ZXingBrowser.BrowserMultiFormatReader();
-    const devices = await ZXingBrowser.BrowserCodeReader.listVideoInputDevices();
+/* Native detector loop */
+async function loopBarcodeDetector() {
+  if (!('BarcodeDetector' in window)) return false;
+  let detector;
+  try { detector = new window.BarcodeDetector({ formats: BARCODE_FORMATS }); }
+  catch { return false; }
+  detectLoopRunning = true;
+  const offscreen = document.createElement('canvas');
+  const ctx = offscreen.getContext('2d');
+  const tick = async () => {
+    if (!detectLoopRunning) return;
+    try {
+      const w = video.videoWidth, h = video.videoHeight;
+      if (w && h) {
+        offscreen.width = w; offscreen.height = h;
+        ctx.drawImage(video, 0, 0, w, h);
+        const barcodes = await detector.detect(offscreen);
+        if (barcodes && barcodes.length) {
+          const txt = (barcodes[0].rawValue || barcodes[0].data || '').toString();
+          detectLoopRunning = false;
+          await stopCamera();
+          barcodeInput.value = txt;
+          await doLookup(txt);
+          return;
+        }
+      }
+    } catch (e) { /* continue */ }
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+  return true;
+}
 
-    // Prefer back camera on iPhone
-    let deviceId = devices.find(d => /back|rear|environment/i.test(d.label))?.deviceId || devices[0]?.deviceId;
-
-    currentControls = await codeReader.decodeFromVideoDevice(deviceId, video, (result, err, controls) => {
+/* ZXing fallback */
+async function startZXing() {
+  try {
+    zxReader = new ZXingBrowser.BrowserMultiFormatReader();
+    zxControls = await zxReader.decodeFromVideoDevice(null, video, async (result, err, controls) => {
       if (result) {
-        handleBarcodeFound(result.getText());
+        const txt = result.getText();
+        await stopCamera();
+        barcodeInput.value = txt;
+        await doLookup(txt);
       }
     });
-  } catch (err) {
-    startBtn.disabled = false;
-    stopBtn.disabled = true;
-    alert('Camera start failed. Make sure you opened this over HTTPS and allowed camera access in Safari.');
+    return true;
+  } catch (e) {
+    setStatus('ZXing failed to start.', 'err');
+    return false;
   }
 }
 
-function stopScan() {
-  if (currentControls) { currentControls.stop(); currentControls = null; }
-  if (codeReader) { try { codeReader.reset(); } catch(_){} }
-  startBtn.disabled = false;
-  stopBtn.disabled = true;
-}
-
-startBtn.addEventListener('click', startScan);
-stopBtn.addEventListener('click', stopScan);
-lookupBtn.addEventListener('click', () => {
-  const code = (barcodeInput.value || '').trim();
-  if (code) lookup(code);
+/* ======= Events ======= */
+startBtn.addEventListener('click', async () => {
+  startBtn.disabled = true; stopBtn.disabled = false;
+  try { await startCamera(); } catch (_) { startBtn.disabled = false; stopBtn.disabled = true; }
 });
-basisSel.addEventListener('change', () => {
+stopBtn.addEventListener('click', async () => {
+  await stopCamera();
+  startBtn.disabled = false; stopBtn.disabled = true; torchBtn.disabled = true;
+});
+torchBtn.addEventListener('click', async () => { if (hasTorch) await setTorch(!torchOn); });
+zoomRange.addEventListener('input', async (e) => { await setZoom(e.target.value); });
+
+/* Pinch-to-zoom */
+let baseScale = 1, pinchStart = null;
+video.addEventListener('touchstart', (e) => {
+  if (e.touches.length === 2 && !zoomRange.disabled) {
+    pinchStart = Math.hypot(
+      e.touches[0].clientX - e.touches[1].clientX,
+      e.touches[0].clientY - e.touches[1].clientY
+    );
+    baseScale = Number(zoomRange.value);
+  }
+}, { passive: true });
+video.addEventListener('touchmove', async (e) => {
+  if (e.touches.length === 2 && pinchStart && !zoomRange.disabled) {
+    const dist = Math.hypot(
+      e.touches[0].clientX - e.touches[1].clientX,
+      e.touches[0].clientY - e.touches[1].clientY
+    );
+    const scale = dist / pinchStart;
+    let next = baseScale * scale;
+    next = Math.max(zoomRange.min, Math.min(zoomRange.max, next));
+    zoomRange.value = next;
+    await setZoom(next);
+  }
+}, { passive: true });
+
+lookupBtn.addEventListener('click', async () => {
   const code = (barcodeInput.value || '').trim();
-  if (code) lookup(code);
+  if (!code) return;
+  await doLookup(code);
+});
+basisSel.addEventListener('change', async () => {
+  const code = (barcodeInput.value || '').trim();
+  if (code) await doLookup(code);
 });
 </script>
 </body>
 </html>
+
