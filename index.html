@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>Scan & Macro Pie</title>
+<link rel="manifest" href="data:application/manifest+json,{&quot;name&quot;:&quot;Scan & Macro Pie&quot;,&quot;short_name&quot;:&quot;Macro Pie&quot;,&quot;display&quot;:&quot;standalone&quot;,&quot;icons&quot;:[]}" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<style>
+  :root { font-family: -apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
+  body { margin: 0; background: #0f1115; color: #e8eaf0; }
+  header { padding: 16px 20px; position: sticky; top: 0; backdrop-filter: blur(8px); background: rgba(15,17,21,0.8); border-bottom: 1px solid #2a2f3a; }
+  h1 { font-size: 18px; margin: 0; }
+  main { padding: 16px; display: grid; gap: 16px; }
+  .card { background: #151922; border: 1px solid #2a2f3a; border-radius: 12px; padding: 14px; }
+  .row { display: grid; gap: 12px; }
+  .btn { appearance: none; border: 1px solid #3a4152; background: #1b2230; color: #e8eaf0; border-radius: 10px; padding: 12px 14px; font-weight: 600; }
+  .btn:active { transform: scale(0.99); }
+  video { width: 100%; border-radius: 12px; background: #0b0d12; }
+  label { font-size: 13px; color: #a8b0c2; }
+  select, input[type="text"] { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #3a4152; background: #0f1320; color: #e8eaf0; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .muted { color: #9aa3b6; font-size: 13px; }
+  .pill { display:inline-block; padding: 6px 10px; border-radius: 999px; border: 1px solid #2a2f3a; background:#101522; font-size:12px; color:#b4bed1 }
+  canvas { width: 100%; max-width: 520px; height: auto; }
+  .small { font-size: 12px; color: #93a0b6; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+</style>
+</head>
+<body>
+<header><h1>Scan & Macro Pie</h1></header>
+<main>
+
+  <section class="card row">
+    <div class="grid2">
+      <button id="startBtn" class="btn">📷 Start Camera Scan</button>
+      <button id="stopBtn" class="btn" disabled>⏹ Stop</button>
+    </div>
+    <video id="preview" playsinline></video>
+    <div class="grid2">
+      <div>
+        <label>Or enter a barcode (UPC/EAN)</label>
+        <input id="barcodeInput" type="text" inputmode="numeric" placeholder="e.g., 041196910184" />
+      </div>
+      <div>
+        <label>&nbsp;</label>
+        <button id="lookupBtn" class="btn">🔎 Look Up</button>
+      </div>
+    </div>
+    <div class="small">Tip: Good lighting + fill most of the frame with the barcode.</div>
+  </section>
+
+  <section class="card row">
+    <div class="grid2">
+      <div>
+        <label>Nutrition basis</label>
+        <select id="basis">
+          <option value="serving">Per serving (if available)</option>
+          <option value="100g">Per 100g</option>
+        </select>
+      </div>
+      <div>
+        <label>Serving size (auto if provided)</label>
+        <input id="servingText" type="text" placeholder="e.g., 1 cup (240 ml)" />
+      </div>
+    </div>
+    <div id="productMeta" class="muted"></div>
+  </section>
+
+  <section class="card row">
+    <canvas id="chart"></canvas>
+    <div id="macroText" class="mono small"></div>
+    <div class="small">Slices: Fat, Protein, <span class="pill">Fiber</span>, <span class="pill">Added Sugar</span>, Other Carbs.</div>
+  </section>
+
+  <section class="card">
+    <div class="small">
+      Data source: Open Food Facts (public). If “added sugar” isn’t reported, it’s treated as 0 and carbs are split as: other carbs = total carbs − fiber − added sugar (never negative).
+    </div>
+  </section>
+
+</main>
+
+<!-- ZXing barcode scanner -->
+<script src="https://unpkg.com/@zxing/browser@latest"></script>
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+const video = document.getElementById('preview');
+const startBtn = document.getElementById('startBtn');
+const stopBtn = document.getElementById('stopBtn');
+const lookupBtn = document.getElementById('lookupBtn');
+const barcodeInput = document.getElementById('barcodeInput');
+const basisSel = document.getElementById('basis');
+const servingText = document.getElementById('servingText');
+const productMeta = document.getElementById('productMeta');
+const chartEl = document.getElementById('chart');
+let codeReader;
+let currentControls;
+let chart;
+
+function grams(val){ return typeof val === 'number' ? val : (val ? parseFloat(val) : 0); }
+
+function pickNutriments(n, per) {
+  // names as they appear in OFF “nutriments”
+  const fields = {
+    fat: per==='serving' ? 'fat_serving' : 'fat_100g',
+    protein: per==='serving' ? 'proteins_serving' : 'proteins_100g',
+    carbs: per==='serving' ? 'carbohydrates_serving' : 'carbohydrates_100g',
+    fiber: per==='serving' ? 'fiber_serving' : 'fiber_100g',
+    sugars: per==='serving' ? 'sugars_serving' : 'sugars_100g',
+    added: per==='serving' ? 'added-sugars_serving' : 'added-sugars_100g'
+  };
+  const fat = grams(n[fields.fat]);
+  const protein = grams(n[fields.protein]);
+  const carbs = grams(n[fields.carbs]);
+  const fiber = grams(n[fields.fiber]);
+  const addedSugar = grams(n[fields.added]); // may be 0 if not present
+  // ensure “other carbs” never negative
+  const otherCarbs = Math.max(carbs - fiber - addedSugar, 0);
+  return { fat, protein, fiber, addedSugar, otherCarbs, carbsTotal: carbs };
+}
+
+function kcalFromMacros({fat, protein, fiber, addedSugar, otherCarbs}) {
+  // standard factors: fat 9, protein 4, carbs 4, fiber often counted 2 (varies).
+  // We’ll treat fiber as 2 kcal/g to avoid inflating totals.
+  const kcals = fat*9 + protein*4 + (addedSugar+otherCarbs)*4 + fiber*2;
+  return Math.round(kcals);
+}
+
+function updateChart(label, macros) {
+  const data = [macros.fat, macros.protein, macros.fiber, macros.addedSugar, macros.otherCarbs];
+  const labels = ['Fat (g)','Protein (g)','Fiber (g)','Added Sugar (g)','Other Carbs (g)'];
+  if (chart) chart.destroy();
+  chart = new Chart(chartEl, {
+    type: 'pie',
+    data: { labels, datasets: [{ data }] },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 12 } },
+        title: { display: true, text: label }
+      }
+    }
+  });
+  const kcal = kcalFromMacros(macros);
+  const text =
+`Fat:          ${macros.fat.toFixed(1)} g
+Protein:      ${macros.protein.toFixed(1)} g
+Fiber:        ${macros.fiber.toFixed(1)} g
+Added sugar:  ${macros.addedSugar.toFixed(1)} g
+Other carbs:  ${macros.otherCarbs.toFixed(1)} g
+-----------------------------
+Est. calories: ${kcal} kcal`;
+  document.getElementById('macroText').textContent = text;
+}
+
+async function fetchProduct(barcode) {
+  const url = `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(barcode)}.json`;
+  const res = await fetch(url, { cache: 'no-store' });
+  if (!res.ok) throw new Error('Lookup failed');
+  const j = await res.json();
+  if (!j || j.status !== 1 || !j.product) throw new Error('Product not found');
+  return j.product;
+}
+
+function setMeta(p) {
+  const brand = p.brands || '';
+  const name = p.product_name || p.generic_name || 'Unnamed product';
+  const serving = p.serving_size || '';
+  const base = basisSel.value;
+  servingText.value = serving || servingText.value;
+  productMeta.innerHTML = `
+    <div><strong>${brand ? brand + ' — ' : ''}${name}</strong></div>
+    <div class="small">Barcode: ${p.code}</div>
+    <div class="small">Nutrition basis: <code>${base === 'serving' ? 'per serving' : 'per 100g'}</code>${serving ? ` • Serving size: <code>${serving}</code>` : ''}</div>
+  `;
+}
+
+async function handleBarcodeFound(code) {
+  stopScan();
+  barcodeInput.value = code;
+  await lookup(code);
+}
+
+async function lookup(code) {
+  try {
+    productMeta.textContent = 'Looking up product…';
+    const p = await fetchProduct(code);
+    setMeta(p);
+    const per = basisSel.value === 'serving' && p.nutrition_data_per === 'serving' ? 'serving' : (basisSel.value === '100g' ? '100g' : (p.nutrition_data_per === '100g' ? '100g' : 'serving'));
+    const macros = pickNutriments(p.nutriments || {}, per);
+    const label = `${(p.brands||'').split(',')[0] ?? ''} ${(p.product_name||'')}`.trim() || 'Product';
+    updateChart(label, macros);
+  } catch (e) {
+    productMeta.innerHTML = `<span class="small">⚠️ ${e.message}. You can type the barcode manually above.</span>`;
+  }
+}
+
+async function startScan() {
+  try {
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
+
+    codeReader = new ZXingBrowser.BrowserMultiFormatReader();
+    const devices = await ZXingBrowser.BrowserCodeReader.listVideoInputDevices();
+
+    // Prefer back camera on iPhone
+    let deviceId = devices.find(d => /back|rear|environment/i.test(d.label))?.deviceId || devices[0]?.deviceId;
+
+    currentControls = await codeReader.decodeFromVideoDevice(deviceId, video, (result, err, controls) => {
+      if (result) {
+        handleBarcodeFound(result.getText());
+      }
+    });
+  } catch (err) {
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+    alert('Camera start failed. Make sure you opened this over HTTPS and allowed camera access in Safari.');
+  }
+}
+
+function stopScan() {
+  if (currentControls) { currentControls.stop(); currentControls = null; }
+  if (codeReader) { try { codeReader.reset(); } catch(_){} }
+  startBtn.disabled = false;
+  stopBtn.disabled = true;
+}
+
+startBtn.addEventListener('click', startScan);
+stopBtn.addEventListener('click', stopScan);
+lookupBtn.addEventListener('click', () => {
+  const code = (barcodeInput.value || '').trim();
+  if (code) lookup(code);
+});
+basisSel.addEventListener('change', () => {
+  const code = (barcodeInput.value || '').trim();
+  if (code) lookup(code);
+});
+</script>
+</body>
+</html>
