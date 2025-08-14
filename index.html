@@ -1,17 +1,24 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Macro Pie • Multi-Disease + Fast Scanner</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Macro Pie • Multi‑Disease + Fast Scanner</title>
 <link rel="preconnect" href="https://cdn.jsdelivr.net"/>
 <style>
   :root{
     --bg:#0f1115;--card:#151922;--ink:#e7ecf3;--muted:#9aa6bd;--line:#2b3140;
     --good:#19c37d;--warn:#f2c352;--bad:#e5484d;--accent:#5aa6ff;
     /* Macro slice colors */
-    --fat-mono:#9ecbff; --fat-poly:#7fb6ff; --fat-other:#5aa6ff; --fat-sat:#3c76c3; --fat-trans:#214c92;
-    --carb-fiber:#ff9a1f; --carb-sugar:#ffe04d; --carb-added:#d8b100; --carb-other:#fff08a;
+    --fat-mono:#9ecbff;           /* light blue */
+    --fat-poly:#7fb6ff;           /* light‑medium blue */
+    --fat-other:#5aa6ff;          /* medium blue (when not indicated) */
+    --fat-sat:#3c76c3;            /* medium‑dark blue */
+    --fat-trans:#214c92;          /* dark blue */
+    --carb-fiber:#ff9a1f;         /* orange */
+    --carb-sugar:#ffe04d;         /* yellow */
+    --carb-added:#d8b100;         /* dark yellow */
+    --carb-other:#fff08a;         /* light yellow */
   }
   html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
   header{position:sticky;top:0;z-index:10;background:rgba(15,17,21,.85);backdrop-filter:blur(10px);border-bottom:1px solid var(--line);padding:12px 16px;display:flex;gap:12px;align-items:center}
@@ -32,9 +39,13 @@
   .badges{display:grid;gap:6px}
   .badge{display:flex;align-items:center;gap:8px;border:1px solid #2e3546;background:#101523;padding:6px 10px;border-radius:999px;font-size:12px;width:max-content}
   .badge .dot{width:10px;height:10px;border-radius:999px}
-  .b-good .dot{background:var(--good)} .b-warn .dot{background:var(--warn)} .b-bad .dot{background:var(--bad)} .b-info .dot{background:var(--accent)}
+  .b-good .dot{background:var(--good)}
+  .b-warn .dot{background:var(--warn)}
+  .b-bad  .dot{background:var(--bad)}
+  .b-info .dot{background:var(--accent)}
   .list{display:grid;gap:6px}
-  .kv{display:flex;gap:8px} .kv .k{width:140px;color:var(--muted)}
+  .kv{display:flex;gap:8px}
+  .kv .k{width:140px;color:var(--muted)}
   .status{font-size:12px;color:var(--muted)}
   .sideInfo{display:grid;gap:8px}
   .togglePanel{display:grid;gap:8px}
@@ -90,7 +101,7 @@
     </section>
 
     <section class="card row">
-      <h3 style="margin:0">Multi-Disease Risk</h3>
+      <h3 style="margin:0">Multi‑Disease Risk</h3>
       <div class="badges" id="diseaseBadges"></div>
       <div class="list" id="diseaseList"></div>
     </section>
@@ -99,27 +110,20 @@
 
 <!-- Chart.js for the pie -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<!-- ZXing (fallback) -->
+<!-- ZXing for fast barcode scanning -->
 <script src="https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/umd/index.min.js"></script>
 <script>
-/***** Helpers *****/
+/***** Utilities *****/
 const $ = (id)=>document.getElementById(id);
+const fmtPct = (x)=> (x*100).toFixed(0)+'%';
+const clamp=(x,a=0,b=1)=>Math.max(a,Math.min(b,x));
 
-/***** State *****/
-let currentDeviceId = null, stream = null, codeReader = null, torchOn=false;
-let usingNativeDetector = 'BarcodeDetector' in window;
-let rafId = null, detector = null;
-
-/***** Lifecycle guards *****/
-window.addEventListener('pageshow', ()=>{ $('camStatus').textContent=''; });
-window.addEventListener('pagehide', stopScan);
-document.addEventListener('visibilitychange', ()=>{ if (document.hidden) stopScan(); });
-
-/***** Camera start (native detector + ZXing fallback) *****/
+/***** Camera / Scanner *****/
+let currentDeviceId = null; let stream = null; let codeReader = null; let torchOn=false;
 async function startScan(){
   if (!isSecureContext){ $('camStatus').textContent='Site must be HTTPS for camera access.'; return; }
   try{
-    // Warm permission (Chrome/Desktop quirk)
+    // Warm permission (desktop quirk)
     try{ const warm = await navigator.mediaDevices.getUserMedia({video:true, audio:false}); warm.getTracks().forEach(t=>t.stop()); }catch{}
 
     // Choose camera
@@ -127,23 +131,19 @@ async function startScan(){
     const preferBack = devices.find(d=>/back|rear|environment/i.test(d.label)) || devices[0];
     currentDeviceId = preferBack?.deviceId;
 
-    // Get stream (degrade gracefully)
+    // Get stream (start simple for laptops)
     try{
-      stream = await navigator.mediaDevices.getUserMedia({
-        video:{ deviceId: currentDeviceId? {exact: currentDeviceId}: undefined,
-                facingMode: currentDeviceId? undefined : {ideal:'environment'},
-                width:{ideal:1280}, height:{ideal:720} },
-        audio:false
-      });
+      stream = await navigator.mediaDevices.getUserMedia({ video: currentDeviceId? { deviceId:{exact: currentDeviceId} } : true, audio:false });
     }catch(err1){
-      try{ stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:{ideal:'environment'} }, audio:false }); }
-      catch(err2){ stream = await navigator.mediaDevices.getUserMedia({ video:true, audio:false }); }
+      try{ stream = await navigator.mediaDevices.getUserMedia({ video:true, audio:false }); }
+      catch(err2){ $('camStatus').textContent='Unable to open camera.'; return; }
     }
 
     const videoEl = $('video');
     videoEl.srcObject = stream; await videoEl.play();
     $('camStatus').textContent = 'Camera ready';
 
+    // Decoder: native first, then ZXing
     if (usingNativeDetector){
       try{
         detector ||= new BarcodeDetector({ formats:['ean_13','ean_8','upc_a','upc_e','code_128'] });
@@ -154,7 +154,7 @@ async function startScan(){
               const val = codes[0].rawValue || codes[0].displayValue;
               if (val){ stopScan(); $('camStatus').textContent='Found barcode: '+val; $('barcodeInput').value=val; lookupByBarcode(val); return; }
             }
-          }catch{} // per-frame errors ignored
+          }catch{}
           rafId = requestAnimationFrame(loop);
         };
         rafId = requestAnimationFrame(loop);
@@ -172,33 +172,14 @@ async function startScan(){
   }
 }
 
-async function startZXingDecode(){
-  if (!codeReader){
-    const formats=[ZXingBrowser.BarcodeFormat.EAN_13, ZXingBrowser.BarcodeFormat.EAN_8, ZXingBrowser.BarcodeFormat.UPC_A, ZXingBrowser.BarcodeFormat.UPC_E, ZXingBrowser.BarcodeFormat.CODE_128];
-    const hints=new Map(); hints.set(ZXingBrowser.DecodeHintType.POSSIBLE_FORMATS, formats);
-    codeReader = new ZXingBrowser.BrowserMultiFormatReader(hints);
-  }
-  await codeReader.decodeFromVideoDevice(currentDeviceId || null, 'video', (result, err, controls)=>{
-    if (result){ controls.stop(); $('camStatus').textContent='Found barcode: '+result.getText(); $('barcodeInput').value=result.getText(); lookupByBarcode(result.getText()); }
-  });
-}
-
 async function switchCamera(){
-  try{
-    const devices = await ZXingBrowser.BrowserCodeReader.listVideoInputDevices();
-    if (!devices.length) return;
-    const idx = devices.findIndex(d=>d.deviceId===currentDeviceId);
-    const next = devices[(idx+1+devices.length)%devices.length];
-    stopScan(); currentDeviceId = next.deviceId; startScan();
-  }catch{ $('camStatus').textContent='No other cameras detected.'; }
+  const devices = await ZXingBrowser.BrowserCodeReader.listVideoInputDevices();
+  if (!devices.length) return;
+  const idx = devices.findIndex(d=>d.deviceId===currentDeviceId);
+  const next = devices[(idx+1)%devices.length];
+  stopScan(); currentDeviceId = next.deviceId; startScan();
 }
-
-function stopScan(){
-  try{ if (rafId){ cancelAnimationFrame(rafId); rafId=null; } }catch{}
-  try{ if (codeReader){ codeReader.reset(); } }catch{}
-  try{ if (stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; } }catch{}
-}
-
+function stopScan(){ try{ if (codeReader) codeReader.reset(); if (stream){stream.getTracks().forEach(t=>t.stop()); stream=null;} }catch{} }
 async function toggleTorch(){
   try{
     const track = stream?.getVideoTracks?.()[0]; if (!track) return;
@@ -207,20 +188,21 @@ async function toggleTorch(){
   }catch{ $('camStatus').textContent = 'Torch not supported on this device.'; }
 }
 
-/***** OpenFoodFacts Lookup *****/
+/***** OpenFoodFacts API fetch *****/
 async function lookupByBarcode(code){
-  $('topStatus').textContent='Looking up product…';
+  $('topStatus').textContent = 'Looking up product…';
   try{
     const res = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json`);
     const data = await res.json();
-    if (!data || data.status!==1){ $('topStatus').textContent='No product found'; return; }
+    if (!data || data.status!==1) { $('topStatus').textContent='No product found'; return; }
     renderProduct(data.product);
-  }catch{ $('topStatus').textContent='Lookup failed. Check connection.'; }
+  }catch(e){ $('topStatus').textContent='Lookup failed. Check connection.'; }
 }
 
-/***** Nutriments & Pie *****/
+/***** Macro breakdown + color scheme *****/
 function getNutriments(p){
   const n = p.nutriments || {};
+  // grams per serving preferred; fall back to 100g
   const basis = n.serving_size ? 'serving' : '100g';
   const suf = basis==='serving' ? '_serving' : '';
   const g = (k)=> Number(n[k+suf] ?? n[k+'_100g'] ?? 0);
@@ -234,41 +216,37 @@ function getNutriments(p){
   const fiber = g('fiber');
   const sugars = g('sugars');
   const added = g('added-sugars');
-  const sugarsTotal = sugars;
+  const sugarsTotal = sugars; // may include added
   const carbsOther = Math.max(carbs - (fiber + sugarsTotal), 0);
   const protein = g('proteins');
-  const sodiumG = Number(n['sodium'+suf] ?? n['sodium_100g'] ?? 0);
+  const sodiumG = Number(n['sodium'+suf] ?? n['sodium_100g'] ?? 0); // grams
   const sodiumMg = sodiumG*1000;
   const kcal = Number(n['energy-kcal'+suf] ?? n['energy-kcal_100g'] ?? 0);
+  // Net carbs (exclude fiber; polyols if available)
   const polyols = g('polyols');
   const netCarbs = Math.max(carbs - fiber - polyols, 0);
   return {basis, kcal, fat, fatMono, fatPoly, fatSat, fatTrans, fatOther, carbs, fiber, sugarsTotal, added, carbsOther, protein, sodiumMg, netCarbs};
 }
 
-function pct(val, parts){
-  const total = parts.fatMono+parts.fatPoly+parts.fatOther+parts.fatSat+parts.fatTrans+parts.fiber+parts.sugarsTotal+parts.added+parts.carbsOther+parts.protein;
-  return total>0 ? Math.round((val/total)*100)+'%' : '0%';
-}
-
 function buildPie(parts){
   const ctx = $('pie').getContext('2d');
-  const slices=[], labels=[], colors=[];
-  const css=(v)=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
-  const add=(val, tag, col)=>{ if (val>0){ slices.push(val); labels.push(tag); colors.push(css(col)); } };
-  // Fats
-  add(parts.fatMono,  `M ${pct(parts.fatMono,parts)}`,  '--fat-mono');
-  add(parts.fatPoly,  `P ${pct(parts.fatPoly,parts)}`,  '--fat-poly');
-  add(parts.fatOther, `O ${pct(parts.fatOther,parts)}`, '--fat-other');
-  add(parts.fatSat,   `S ${pct(parts.fatSat,parts)}`,   '--fat-sat');
-  add(parts.fatTrans, `T ${pct(parts.fatTrans,parts)}`, '--fat-trans');
-  // Carbs
-  add(parts.fiber,       `F ${pct(parts.fiber,parts)}`,       '--carb-fiber');
-  add(parts.sugarsTotal, `Su ${pct(parts.sugarsTotal,parts)}`, '--carb-sugar');
-  add(parts.added,       `A ${pct(parts.added,parts)}`,       '--carb-added');
-  add(parts.carbsOther,  `C ${pct(parts.carbsOther,parts)}`,  '--carb-other');
+  const slices = [];
+  const labels = [];
+  const colors = [];
+  const addSlice=(val,label,color)=>{ if (val>0){ slices.push(val); labels.push(label); colors.push(color);} };
+  // Fats (blue family)
+  addSlice(parts.fatMono,  `M ${pct(parts.fatMono,parts)}`,  getComputedStyle(document.documentElement).getPropertyValue('--fat-mono'));
+  addSlice(parts.fatPoly,  `P ${pct(parts.fatPoly,parts)}`,  getComputedStyle(document.documentElement).getPropertyValue('--fat-poly'));
+  addSlice(parts.fatOther, `O ${pct(parts.fatOther,parts)}`, getComputedStyle(document.documentElement).getPropertyValue('--fat-other'));
+  addSlice(parts.fatSat,   `S ${pct(parts.fatSat,parts)}`,   getComputedStyle(document.documentElement).getPropertyValue('--fat-sat'));
+  addSlice(parts.fatTrans, `T ${pct(parts.fatTrans,parts)}`, getComputedStyle(document.documentElement).getPropertyValue('--fat-trans'));
+  // Carbs (yellow/orange family)
+  addSlice(parts.fiber,    `F ${pct(parts.fiber,parts)}`,    getComputedStyle(document.documentElement).getPropertyValue('--carb-fiber'));
+  addSlice(parts.sugarsTotal,`Su ${pct(parts.sugarsTotal,parts)}`, getComputedStyle(document.documentElement).getPropertyValue('--carb-sugar'));
+  addSlice(parts.added,    `A ${pct(parts.added,parts)}`,    getComputedStyle(document.documentElement).getPropertyValue('--carb-added'));
+  addSlice(parts.carbsOther,`C ${pct(parts.carbsOther,parts)}`, getComputedStyle(document.documentElement).getPropertyValue('--carb-other'));
 
-  if (window._pieObj) window._pieObj.destroy();
-  window._pieObj = new Chart(ctx, {
+  const chart = new Chart(ctx, {
     type:'doughnut',
     data:{ labels, datasets:[{ data:slices, backgroundColor:colors, borderColor:'#0b0d12', borderWidth:2 }]},
     options:{
@@ -278,13 +256,17 @@ function buildPie(parts){
       animation:{ duration:300 }
     }
   });
-  return window._pieObj;
+  return chart;
+}
+function pct(val, parts){
+  const total = parts.fatMono+parts.fatPoly+parts.fatOther+parts.fatSat+parts.fatTrans+parts.fiber+parts.sugarsTotal+parts.added+parts.carbsOther+parts.protein;
+  return total>0 ? Math.round((val/total)*100)+'%' : '0%';
 }
 
 /***** Disease scoring *****/
 function computeDiseaseScores(n, ingredients=[], meta={}){
   const grams = (k)=>Number(n[k] ?? 0);
-  const z=(x,k)=>x/k; const clamp10=(x)=>Math.max(0,Math.min(10,x));
+  const z=(x,k)=>x/k; const clamp=(x,a=0,b=10)=>Math.max(a,Math.min(b,x));
   const protein   = grams('protein');
   const fiber     = grams('fiber');
   const sugars    = grams('sugarsTotal');
@@ -299,25 +281,25 @@ function computeDiseaseScores(n, ingredients=[], meta={}){
   const sweeteners = has('aspartame','acesulfame','saccharin','sucralose');
   const seedOils = has('soybean oil','corn oil','cottonseed oil','canola oil','sunflower oil');
 
-  const cancer   = 3.0*z(sugars,20)+2.2*z(satFat,10)+2.5*(transFat>0?1:0)+3.0*z(sodiumMg,2000)+2.8*(processedMeat?1:0)+2.0*(dyes?1:0)+2.2*(isUltra?1:0)-1.8*z(fiber,8)-0.6*z(protein,30);
+  const cancer = 3.0*z(sugars,20)+2.2*z(satFat,10)+2.5*(transFat>0?1:0)+3.0*z(sodiumMg,2000)+2.8*(processedMeat?1:0)+2.0*(dyes?1:0)+2.2*(isUltra?1:0)-1.8*z(fiber,8)-0.6*z(protein,30);
   const diabetes = 4.0*z(sugars,20)+3.0*z(Math.max(netCarbs,0),40)+1.0*z(sodiumMg,2000)+1.5*(sweeteners?1:0)+1.5*(isUltra?1:0)-2.5*z(fiber,8)-0.7*z(protein,30);
-  const cvd      = 3.2*z(sodiumMg,2000)+3.2*z(satFat,10)+2.5*(transFat>0?1:0)+1.5*(seedOils?1:0)+1.5*(isUltra?1:0)-2.0*z(fiber,8);
-  const nafld    = 3.8*z(sugars,20)+2.8*z(Math.max(netCarbs,0),40)+1.5*z(satFat,10)+1.5*(isUltra?1:0)-1.5*z(fiber,8);
+  const cvd = 3.2*z(sodiumMg,2000)+3.2*z(satFat,10)+2.5*(transFat>0?1:0)+1.5*(seedOils?1:0)+1.5*(isUltra?1:0)-2.0*z(fiber,8);
+  const nafld = 3.8*z(sugars,20)+2.8*z(Math.max(netCarbs,0),40)+1.5*z(satFat,10)+1.5*(isUltra?1:0)-1.5*z(fiber,8);
   const dementia = 2.4*(isUltra?1:0)+2.0*z(sugars,20)+1.8*z(satFat,10)+1.2*z(sodiumMg,2000)-1.8*z(fiber,8);
-  const gout     = 3.0*(processedMeat?1:0)+1.2*z(sugars,20);
-
-  const scores = { cancer:clamp10(cancer), diabetes:clamp10(diabetes), cvd:clamp10(cvd), nafld:clamp10(nafld), dementia:clamp10(dementia), gout:clamp10(gout) };
-  const overall = clamp10(0.28*scores.cancer+0.28*scores.diabetes+0.22*scores.cvd+0.12*scores.nafld+0.08*scores.dementia+0.02*scores.gout);
+  const gout = 3.0*(processedMeat?1:0)+1.2*z(sugars,20);
+  const scores = { cancer:clamp(cancer), diabetes:clamp(diabetes), cvd:clamp(cvd), nafld:clamp(nafld), dementia:clamp(dementia), gout:clamp(gout) };
+  const overall = clamp(0.28*scores.cancer+0.28*scores.diabetes+0.22*scores.cvd+0.12*scores.nafld+0.08*scores.dementia+0.02*scores.gout);
   return { ...scores, overall };
 }
 
 /***** Renderers *****/
-let pieChart=null, cycleIdx=0;
+let pieChart=null; let cycleIdx=0; // 0 kcal, 1 protein, 2 net carbs, 3 sodium
 function renderProduct(p){
   const parts = getNutriments(p);
   const meta = { nova: p.nova_group, alcohol_g: 0 };
   const ingredients = (p.ingredients_text || '').toLowerCase().split(/[,;()]/).map(s=>s.trim()).filter(Boolean);
 
+  // Header/meta
   const brand = p.brands || 'Unknown Brand';
   const name = p.product_name || 'Unknown Product';
   $('productMeta').innerHTML = `
@@ -326,9 +308,11 @@ function renderProduct(p){
     <div class="kv"><div class="k">Serving Basis</div><div>${parts.basis}</div></div>
   `;
 
+  // Pie
   if (pieChart){ pieChart.destroy(); }
   pieChart = buildPie({...parts});
 
+  // Macro list (left‑aligned, one column)
   $('macroList').innerHTML = `
     <div>Protein: <b>${parts.protein.toFixed(1)} g</b></div>
     <div>Fat: <b>${parts.fat.toFixed(1)} g</b> (Mono ${parts.fatMono.toFixed(1)}, Poly ${parts.fatPoly.toFixed(1)}, Sat ${parts.fatSat.toFixed(1)}, Trans ${parts.fatTrans.toFixed(1)}, Other ${parts.fatOther.toFixed(1)})</div>
@@ -338,11 +322,16 @@ function renderProduct(p){
     <div>Calories: <b>${Math.round(parts.kcal)} kcal</b></div>
   `;
 
+  // Center toggle (moved to the right as requested earlier)
   cycleIdx=0; updateCenter(parts);
   $('centerToggle').onclick=()=>{ cycleIdx=(cycleIdx+1)%4; updateCenter(parts); };
 
+  // App badges (stacked, only non-neutral)
   renderBadges(parts, p);
+
+  // Disease panel
   renderDisease(parts, ingredients, meta);
+
   $('topStatus').textContent = 'Loaded: '+name;
 }
 
@@ -358,6 +347,7 @@ function updateCenter(parts){
 }
 
 function addBadge(container, text, level){
+  // level: good|warn|bad|info
   const div=document.createElement('div');
   div.className='badge b-'+(level||'info');
   div.innerHTML = `<span class="dot"></span><span>${text}</span>`;
@@ -366,6 +356,7 @@ function addBadge(container, text, level){
 
 function renderBadges(parts, p){
   const el=$('badges'); el.innerHTML='';
+  // thresholds
   const highProtein = parts.protein>=20;
   const lowSugar = parts.added<=5 && parts.sugarsTotal<=8;
   const highFiber = parts.fiber>=5;
@@ -373,13 +364,13 @@ function renderBadges(parts, p){
   const keto = (parts.netCarbs<=8 && parts.fiber>=3) || (parts.netCarbs<=5);
   const processed = (p.nova_group===4);
 
-  if (keto) addBadge(el,'Keto-Friendly','good');
-  if (highProtein) addBadge(el,'High-Protein','good');
-  if (highFiber) addBadge(el,'High-Fiber','good');
-  if (lowSugar) addBadge(el,'Low-Sugar','good');
-  if (lowSodium) addBadge(el,'Low-Sodium','good');
-  if (highSodium) addBadge(el,'High-Sodium','bad');
-  if (processed) addBadge(el,'High-Processed','warn');
+  if (keto) addBadge(el,'Keto‑Friendly','good');
+  if (highProtein) addBadge(el,'High‑Protein','good');
+  if (highFiber) addBadge(el,'High‑Fiber','good');
+  if (lowSugar) addBadge(el,'Low‑Sugar','good');
+  if (lowSodium) addBadge(el,'Low‑Sodium','good');
+  if (highSodium) addBadge(el,'High‑Sodium','bad');
+  if (processed) addBadge(el,'High‑Processed','warn');
 }
 
 function renderDisease(parts, ingredients, meta){
@@ -391,6 +382,7 @@ function renderDisease(parts, ingredients, meta){
 
   const db=$('diseaseBadges'); db.innerHTML='';
   const dl=$('diseaseList'); dl.innerHTML='';
+
   const rows=[
     ['Overall Risk', scores.overall],
     ['Cancer', scores.cancer],
@@ -404,10 +396,12 @@ function renderDisease(parts, ingredients, meta){
     const level = val>=7?'bad': val>=4?'warn':'good';
     addBadge(db, `${label}: ${val.toFixed(1)}/10`, level);
   }
+
+  // detailed list
   dl.innerHTML = rows.map(([l,v])=>`<div class="kv"><div class="k">${l}</div><div>${v.toFixed(1)} / 10</div></div>`).join('');
 }
 
-/***** Diagnostics *****/
+ /***** Diagnostics *****/
 async function runDiagnostics(){
   const parts=[];
   parts.push('Secure Context: '+(isSecureContext?'yes':'NO (need HTTPS)'));
@@ -427,6 +421,3 @@ $('switchBtn').onclick = switchCamera;
 $('torchBtn').onclick = toggleTorch;
 $('lookupBtn').onclick = ()=>{ const code=$('barcodeInput').value.trim(); if (code) lookupByBarcode(code); };
 $('diagBtn').onclick = runDiagnostics;
-</script>
-</body>
-</html>
