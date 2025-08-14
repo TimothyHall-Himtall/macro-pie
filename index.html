@@ -1,24 +1,24 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Macro Pie • Multi‑Disease + Fast Scanner</title>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Macro Pie • Multi-Disease + Fast Scanner</title>
 <link rel="preconnect" href="https://cdn.jsdelivr.net"/>
 <style>
   :root{
     --bg:#0f1115;--card:#151922;--ink:#e7ecf3;--muted:#9aa6bd;--line:#2b3140;
     --good:#19c37d;--warn:#f2c352;--bad:#e5484d;--accent:#5aa6ff;
-    /* Macro slice colors */
-    --fat-mono:#9ecbff;           /* light blue */
-    --fat-poly:#7fb6ff;           /* light‑medium blue */
-    --fat-other:#5aa6ff;          /* medium blue (when not indicated) */
-    --fat-sat:#3c76c3;            /* medium‑dark blue */
-    --fat-trans:#214c92;          /* dark blue */
-    --carb-fiber:#ff9a1f;         /* orange */
-    --carb-sugar:#ffe04d;         /* yellow */
-    --carb-added:#d8b100;         /* dark yellow */
-    --carb-other:#fff08a;         /* light yellow */
+    /* Macro slice colors (your scheme) */
+    --fat-mono:#9ecbff;        /* light blue */
+    --fat-poly:#7fb6ff;        /* light-medium blue */
+    --fat-other:#5aa6ff;       /* medium blue (when not indicated) */
+    --fat-sat:#3c76c3;         /* medium-dark blue */
+    --fat-trans:#214c92;       /* dark blue */
+    --carb-fiber:#ff9a1f;      /* orange */
+    --carb-sugar:#ffe04d;      /* yellow */
+    --carb-added:#d8b100;      /* dark yellow */
+    --carb-other:#fff08a;      /* light yellow */
   }
   html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
   header{position:sticky;top:0;z-index:10;background:rgba(15,17,21,.85);backdrop-filter:blur(10px);border-bottom:1px solid var(--line);padding:12px 16px;display:flex;gap:12px;align-items:center}
@@ -77,6 +77,7 @@
       <div class="kv">
         <button id="torchBtn" class="btn btn-subtle">🔦 Torch</button>
         <button id="switchBtn" class="btn btn-subtle">🔁 Switch Camera</button>
+        <button id="diagBtn" class="btn btn-subtle">🧪 Diagnostics</button>
         <span id="camStatus" class="status"></span>
       </div>
     </section>
@@ -100,7 +101,7 @@
     </section>
 
     <section class="card row">
-      <h3 style="margin:0">Multi‑Disease Risk</h3>
+      <h3 style="margin:0">Multi-Disease Risk</h3>
       <div class="badges" id="diseaseBadges"></div>
       <div class="list" id="diseaseList"></div>
     </section>
@@ -112,47 +113,53 @@
 <!-- ZXing for fast barcode scanning -->
 <script src="https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/umd/index.min.js"></script>
 <script>
-/***** Utilities *****/
+/***** Helpers *****/
 const $ = (id)=>document.getElementById(id);
-const fmtPct = (x)=> (x*100).toFixed(0)+'%';
 const clamp=(x,a=0,b=1)=>Math.max(a,Math.min(b,x));
 
 /***** Camera / Scanner *****/
-let currentDeviceId = null; let stream = null; let codeReader = null; let torchOn=false;
+let currentDeviceId = null, stream = null, codeReader = null, torchOn=false;
+
 async function startScan(){
+  // iOS requires user gesture — this runs inside the button click
+  if (!isSecureContext){ $('camStatus').textContent='Site must be HTTPS for camera access.'; return; }
   try{
+    // Choose a camera
     const devices = await ZXingBrowser.BrowserCodeReader.listVideoInputDevices();
     const preferBack = devices.find(d=>/back|rear|environment/i.test(d.label)) || devices[0];
-    currentDeviceId = preferBack?.deviceId || null;
+    currentDeviceId = preferBack?.deviceId;
 
-    stream = await navigator.mediaDevices.getUserMedia({
-      video:{
-        deviceId: currentDeviceId ? {exact: currentDeviceId} : undefined,
-        facingMode: currentDeviceId? undefined : {ideal:'environment'},
-        width:{ideal:1280}, height:{ideal:720},
-        focusMode: 'continuous',
-        advanced:[{focusMode:'continuous'}]
-      },
-      audio:false
-    });
-    $('video').srcObject = stream; await $('video').play();
+    // Attempt 1: rear with ideal res
+    try{
+      stream = await navigator.mediaDevices.getUserMedia({
+        video:{ deviceId: currentDeviceId? {exact: currentDeviceId}: undefined,
+                facingMode: currentDeviceId? undefined : {ideal:'environment'},
+                width:{ideal:1280}, height:{ideal:720} },
+        audio:false
+      });
+    }catch(err1){
+      // Attempt 2: simplified env camera
+      try{
+        stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:{ideal:'environment'} }, audio:false });
+      }catch(err2){
+        // Attempt 3: any camera
+        stream = await navigator.mediaDevices.getUserMedia({ video:true, audio:false });
+      }
+    }
+
+    $('video').srcObject = stream;
+    await $('video').play();
     $('camStatus').textContent = 'Camera ready';
 
-    // ZXing reader with hints (UPC/EAN first)
-    if (!codeReader) codeReader = new ZXingBrowser.BrowserMultiFormatReader();
-    const formats = [
-      ZXingBrowser.BarcodeFormat.EAN_13,
-      ZXingBrowser.BarcodeFormat.EAN_8,
-      ZXingBrowser.BarcodeFormat.UPC_A,
-      ZXingBrowser.BarcodeFormat.UPC_E,
-      ZXingBrowser.BarcodeFormat.CODE_128
-    ];
-    const hints = new Map(); hints.set(ZXingBrowser.DecodeHintType.POSSIBLE_FORMATS, formats);
-    codeReader = new ZXingBrowser.BrowserMultiFormatReader(hints);
+    // ZXing setup (prefer retail symbologies)
+    if (!codeReader){
+      const formats=[ZXingBrowser.BarcodeFormat.EAN_13, ZXingBrowser.BarcodeFormat.EAN_8, ZXingBrowser.BarcodeFormat.UPC_A, ZXingBrowser.BarcodeFormat.UPC_E, ZXingBrowser.BarcodeFormat.CODE_128];
+      const hints=new Map(); hints.set(ZXingBrowser.DecodeHintType.POSSIBLE_FORMATS, formats);
+      codeReader = new ZXingBrowser.BrowserMultiFormatReader(hints);
+    }
 
-    // Continuous decode with throttling
-    await codeReader.decodeFromVideoDevice(currentDeviceId, 'video', (result, err, controls)=>{
-      if (result) {
+    await codeReader.decodeFromVideoDevice(currentDeviceId || null, 'video', (result, err, controls)=>{
+      if (result){
         controls.stop();
         $('camStatus').textContent = 'Found barcode: '+result.getText();
         $('barcodeInput').value = result.getText();
@@ -160,41 +167,64 @@ async function startScan(){
       }
     });
   }catch(e){
-    console.error(e);
-    $('camStatus').textContent = 'Camera blocked. Allow access in browser settings.';
+    console.error('startScan error', e);
+    let msg='Camera blocked. Allow access in Settings > Safari > Camera.';
+    if (e?.name==='NotAllowedError' || e?.name==='SecurityError') msg='Permission denied. Safari: aA → Website Settings → Camera → Allow, then reload.';
+    if (e?.name==='NotFoundError') msg='No camera found. Try Switch Camera.';
+    if (e?.name==='OverconstrainedError') msg='Unsupported camera constraints. Tap Start Scan again to retry with defaults.';
+    $('camStatus').textContent = msg;
   }
 }
+
 async function switchCamera(){
-  const devices = await ZXingBrowser.BrowserCodeReader.listVideoInputDevices();
-  if (!devices.length) return;
-  const idx = devices.findIndex(d=>d.deviceId===currentDeviceId);
-  const next = devices[(idx+1)%devices.length];
-  stopScan(); currentDeviceId = next.deviceId; startScan();
+  try{
+    const devices = await ZXingBrowser.BrowserCodeReader.listVideoInputDevices();
+    if (!devices.length) return;
+    const idx = devices.findIndex(d=>d.deviceId===currentDeviceId);
+    const next = devices[(idx+1+devices.length)%devices.length];
+    stopScan(); currentDeviceId = next.deviceId; startScan();
+  }catch(e){ $('camStatus').textContent='No other cameras detected.'; }
 }
-function stopScan(){ try{ if (codeReader) codeReader.reset(); if (stream){stream.getTracks().forEach(t=>t.stop()); stream=null;} }catch{} }
+
+function stopScan(){
+  try{
+    if (codeReader) codeReader.reset();
+    if (stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
+  }catch{}
+}
+
 async function toggleTorch(){
   try{
     const track = stream?.getVideoTracks?.()[0]; if (!track) return;
     await track.applyConstraints({advanced:[{torch:!torchOn}]});
-    torchOn = !torchOn; $('torchBtn').textContent = torchOn? '🔦 Torch On' : '🔦 Torch';
-  }catch{ $('camStatus').textContent = 'Torch not supported on this device.'; }
+    torchOn = !torchOn;
+    $('torchBtn').textContent = torchOn? '🔦 Torch On' : '🔦 Torch';
+  }catch{
+    $('camStatus').textContent = 'Torch not supported on this device.';
+  }
 }
 
-/***** OpenFoodFacts API fetch *****/
+// Pause camera when page hidden (saves battery, avoids iOS glitches)
+document.addEventListener('visibilitychange', ()=>{
+  if (document.hidden) stopScan();
+});
+
+/***** Lookup (OpenFoodFacts) *****/
 async function lookupByBarcode(code){
   $('topStatus').textContent = 'Looking up product…';
   try{
     const res = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json`);
     const data = await res.json();
-    if (!data || data.status!==1) { $('topStatus').textContent='No product found'; return; }
+    if (!data || data.status!==1){ $('topStatus').textContent='No product found'; return; }
     renderProduct(data.product);
-  }catch(e){ $('topStatus').textContent='Lookup failed. Check connection.'; }
+  }catch(e){
+    $('topStatus').textContent='Lookup failed. Check connection.';
+  }
 }
 
-/***** Macro breakdown + color scheme *****/
+/***** Nutriments & Pie *****/
 function getNutriments(p){
   const n = p.nutriments || {};
-  // grams per serving preferred; fall back to 100g
   const basis = n.serving_size ? 'serving' : '100g';
   const suf = basis==='serving' ? '_serving' : '';
   const g = (k)=> Number(n[k+suf] ?? n[k+'_100g'] ?? 0);
@@ -208,37 +238,41 @@ function getNutriments(p){
   const fiber = g('fiber');
   const sugars = g('sugars');
   const added = g('added-sugars');
-  const sugarsTotal = sugars; // may include added
+  const sugarsTotal = sugars;
   const carbsOther = Math.max(carbs - (fiber + sugarsTotal), 0);
   const protein = g('proteins');
-  const sodiumG = Number(n['sodium'+suf] ?? n['sodium_100g'] ?? 0); // grams
+  const sodiumG = Number(n['sodium'+suf] ?? n['sodium_100g'] ?? 0);
   const sodiumMg = sodiumG*1000;
   const kcal = Number(n['energy-kcal'+suf] ?? n['energy-kcal_100g'] ?? 0);
-  // Net carbs (exclude fiber; polyols if available)
   const polyols = g('polyols');
   const netCarbs = Math.max(carbs - fiber - polyols, 0);
   return {basis, kcal, fat, fatMono, fatPoly, fatSat, fatTrans, fatOther, carbs, fiber, sugarsTotal, added, carbsOther, protein, sodiumMg, netCarbs};
 }
 
+function pct(val, parts){
+  const total = parts.fatMono+parts.fatPoly+parts.fatOther+parts.fatSat+parts.fatTrans+parts.fiber+parts.sugarsTotal+parts.added+parts.carbsOther+parts.protein;
+  return total>0 ? Math.round((val/total)*100)+'%' : '0%';
+}
+
 function buildPie(parts){
   const ctx = $('pie').getContext('2d');
-  const slices = [];
-  const labels = [];
-  const colors = [];
-  const addSlice=(val,label,color)=>{ if (val>0){ slices.push(val); labels.push(label); colors.push(color);} };
+  const slices=[], labels=[], colors=[];
+  const css=(v)=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  const add=(val, tag, col)=>{ if (val>0){ slices.push(val); labels.push(tag); colors.push(css(col)); } };
   // Fats (blue family)
-  addSlice(parts.fatMono,  `M ${pct(parts.fatMono,parts)}`,  getComputedStyle(document.documentElement).getPropertyValue('--fat-mono'));
-  addSlice(parts.fatPoly,  `P ${pct(parts.fatPoly,parts)}`,  getComputedStyle(document.documentElement).getPropertyValue('--fat-poly'));
-  addSlice(parts.fatOther, `O ${pct(parts.fatOther,parts)}`, getComputedStyle(document.documentElement).getPropertyValue('--fat-other'));
-  addSlice(parts.fatSat,   `S ${pct(parts.fatSat,parts)}`,   getComputedStyle(document.documentElement).getPropertyValue('--fat-sat'));
-  addSlice(parts.fatTrans, `T ${pct(parts.fatTrans,parts)}`, getComputedStyle(document.documentElement).getPropertyValue('--fat-trans'));
+  add(parts.fatMono,  `M ${pct(parts.fatMono,parts)}`,  '--fat-mono');
+  add(parts.fatPoly,  `P ${pct(parts.fatPoly,parts)}`,  '--fat-poly');
+  add(parts.fatOther, `O ${pct(parts.fatOther,parts)}`, '--fat-other');
+  add(parts.fatSat,   `S ${pct(parts.fatSat,parts)}`,   '--fat-sat');
+  add(parts.fatTrans, `T ${pct(parts.fatTrans,parts)}`, '--fat-trans');
   // Carbs (yellow/orange family)
-  addSlice(parts.fiber,    `F ${pct(parts.fiber,parts)}`,    getComputedStyle(document.documentElement).getPropertyValue('--carb-fiber'));
-  addSlice(parts.sugarsTotal,`Su ${pct(parts.sugarsTotal,parts)}`, getComputedStyle(document.documentElement).getPropertyValue('--carb-sugar'));
-  addSlice(parts.added,    `A ${pct(parts.added,parts)}`,    getComputedStyle(document.documentElement).getPropertyValue('--carb-added'));
-  addSlice(parts.carbsOther,`C ${pct(parts.carbsOther,parts)}`, getComputedStyle(document.documentElement).getPropertyValue('--carb-other'));
+  add(parts.fiber,       `F ${pct(parts.fiber,parts)}`,       '--carb-fiber');
+  add(parts.sugarsTotal, `Su ${pct(parts.sugarsTotal,parts)}`, '--carb-sugar');
+  add(parts.added,       `A ${pct(parts.added,parts)}`,       '--carb-added');
+  add(parts.carbsOther,  `C ${pct(parts.carbsOther,parts)}`,  '--carb-other');
 
-  const chart = new Chart(ctx, {
+  if (window._pieObj) window._pieObj.destroy();
+  window._pieObj = new Chart(ctx, {
     type:'doughnut',
     data:{ labels, datasets:[{ data:slices, backgroundColor:colors, borderColor:'#0b0d12', borderWidth:2 }]},
     options:{
@@ -248,17 +282,13 @@ function buildPie(parts){
       animation:{ duration:300 }
     }
   });
-  return chart;
-}
-function pct(val, parts){
-  const total = parts.fatMono+parts.fatPoly+parts.fatOther+parts.fatSat+parts.fatTrans+parts.fiber+parts.sugarsTotal+parts.added+parts.carbsOther+parts.protein;
-  return total>0 ? Math.round((val/total)*100)+'%' : '0%';
+  return window._pieObj;
 }
 
-/***** Disease scoring *****/
+/***** Multi-Disease scoring *****/
 function computeDiseaseScores(n, ingredients=[], meta={}){
   const grams = (k)=>Number(n[k] ?? 0);
-  const z=(x,k)=>x/k; const clamp=(x,a=0,b=10)=>Math.max(a,Math.min(b,x));
+  const z=(x,k)=>x/k; const clamp10=(x)=>Math.max(0,Math.min(10,x));
   const protein   = grams('protein');
   const fiber     = grams('fiber');
   const sugars    = grams('sugarsTotal');
@@ -273,19 +303,28 @@ function computeDiseaseScores(n, ingredients=[], meta={}){
   const sweeteners = has('aspartame','acesulfame','saccharin','sucralose');
   const seedOils = has('soybean oil','corn oil','cottonseed oil','canola oil','sunflower oil');
 
-  const cancer = 3.0*z(sugars,20)+2.2*z(satFat,10)+2.5*(transFat>0?1:0)+3.0*z(sodiumMg,2000)+2.8*(processedMeat?1:0)+2.0*(dyes?1:0)+2.2*(isUltra?1:0)-1.8*z(fiber,8)-0.6*z(protein,30);
+  const cancer   = 3.0*z(sugars,20)+2.2*z(satFat,10)+2.5*(transFat>0?1:0)+3.0*z(sodiumMg,2000)+2.8*(processedMeat?1:0)+2.0*(dyes?1:0)+2.2*(isUltra?1:0)-1.8*z(fiber,8)-0.6*z(protein,30);
   const diabetes = 4.0*z(sugars,20)+3.0*z(Math.max(netCarbs,0),40)+1.0*z(sodiumMg,2000)+1.5*(sweeteners?1:0)+1.5*(isUltra?1:0)-2.5*z(fiber,8)-0.7*z(protein,30);
-  const cvd = 3.2*z(sodiumMg,2000)+3.2*z(satFat,10)+2.5*(transFat>0?1:0)+1.5*(seedOils?1:0)+1.5*(isUltra?1:0)-2.0*z(fiber,8);
-  const nafld = 3.8*z(sugars,20)+2.8*z(Math.max(netCarbs,0),40)+1.5*z(satFat,10)+1.5*(isUltra?1:0)-1.5*z(fiber,8);
+  const cvd      = 3.2*z(sodiumMg,2000)+3.2*z(satFat,10)+2.5*(transFat>0?1:0)+1.5*(seedOils?1:0)+1.5*(isUltra?1:0)-2.0*z(fiber,8);
+  const nafld    = 3.8*z(sugars,20)+2.8*z(Math.max(netCarbs,0),40)+1.5*z(satFat,10)+1.5*(isUltra?1:0)-1.5*z(fiber,8);
   const dementia = 2.4*(isUltra?1:0)+2.0*z(sugars,20)+1.8*z(satFat,10)+1.2*z(sodiumMg,2000)-1.8*z(fiber,8);
-  const gout = 3.0*(processedMeat?1:0)+1.2*z(sugars,20);
-  const scores = { cancer:clamp(cancer), diabetes:clamp(diabetes), cvd:clamp(cvd), nafld:clamp(nafld), dementia:clamp(dementia), gout:clamp(gout) };
-  const overall = clamp(0.28*scores.cancer+0.28*scores.diabetes+0.22*scores.cvd+0.12*scores.nafld+0.08*scores.dementia+0.02*scores.gout);
+  const gout     = 3.0*(processedMeat?1:0)+1.2*z(sugars,20);
+
+  const scores = {
+    cancer:   clamp10(cancer),
+    diabetes: clamp10(diabetes),
+    cvd:      clamp10(cvd),
+    nafld:    clamp10(nafld),
+    dementia: clamp10(dementia),
+    gout:     clamp10(gout)
+  };
+  const overall = clamp10(0.28*scores.cancer+0.28*scores.diabetes+0.22*scores.cvd+0.12*scores.nafld+0.08*scores.dementia+0.02*scores.gout);
   return { ...scores, overall };
 }
 
 /***** Renderers *****/
-let pieChart=null; let cycleIdx=0; // 0 kcal, 1 protein, 2 net carbs, 3 sodium
+let pieChart=null, cycleIdx=0; // 0 kcal, 1 protein, 2 net carbs, 3 sodium
+
 function renderProduct(p){
   const parts = getNutriments(p);
   const meta = { nova: p.nova_group, alcohol_g: 0 };
@@ -304,7 +343,7 @@ function renderProduct(p){
   if (pieChart){ pieChart.destroy(); }
   pieChart = buildPie({...parts});
 
-  // Macro list (left‑aligned, one column)
+  // Macro list (left-aligned, one column)
   $('macroList').innerHTML = `
     <div>Protein: <b>${parts.protein.toFixed(1)} g</b></div>
     <div>Fat: <b>${parts.fat.toFixed(1)} g</b> (Mono ${parts.fatMono.toFixed(1)}, Poly ${parts.fatPoly.toFixed(1)}, Sat ${parts.fatSat.toFixed(1)}, Trans ${parts.fatTrans.toFixed(1)}, Other ${parts.fatOther.toFixed(1)})</div>
@@ -314,7 +353,7 @@ function renderProduct(p){
     <div>Calories: <b>${Math.round(parts.kcal)} kcal</b></div>
   `;
 
-  // Center toggle (moved to the right as requested earlier)
+  // Center toggle (moved outside pie — text on the right)
   cycleIdx=0; updateCenter(parts);
   $('centerToggle').onclick=()=>{ cycleIdx=(cycleIdx+1)%4; updateCenter(parts); };
 
@@ -339,7 +378,6 @@ function updateCenter(parts){
 }
 
 function addBadge(container, text, level){
-  // level: good|warn|bad|info
   const div=document.createElement('div');
   div.className='badge b-'+(level||'info');
   div.innerHTML = `<span class="dot"></span><span>${text}</span>`;
@@ -348,7 +386,6 @@ function addBadge(container, text, level){
 
 function renderBadges(parts, p){
   const el=$('badges'); el.innerHTML='';
-  // thresholds
   const highProtein = parts.protein>=20;
   const lowSugar = parts.added<=5 && parts.sugarsTotal<=8;
   const highFiber = parts.fiber>=5;
@@ -356,13 +393,13 @@ function renderBadges(parts, p){
   const keto = (parts.netCarbs<=8 && parts.fiber>=3) || (parts.netCarbs<=5);
   const processed = (p.nova_group===4);
 
-  if (keto) addBadge(el,'Keto‑Friendly','good');
-  if (highProtein) addBadge(el,'High‑Protein','good');
-  if (highFiber) addBadge(el,'High‑Fiber','good');
-  if (lowSugar) addBadge(el,'Low‑Sugar','good');
-  if (lowSodium) addBadge(el,'Low‑Sodium','good');
-  if (highSodium) addBadge(el,'High‑Sodium','bad');
-  if (processed) addBadge(el,'High‑Processed','warn');
+  if (keto) addBadge(el,'Keto-Friendly','good');
+  if (highProtein) addBadge(el,'High-Protein','good');
+  if (highFiber) addBadge(el,'High-Fiber','good');
+  if (lowSugar) addBadge(el,'Low-Sugar','good');
+  if (lowSodium) addBadge(el,'Low-Sodium','good');
+  if (highSodium) addBadge(el,'High-Sodium','bad');
+  if (processed) addBadge(el,'High-Processed','warn');
 }
 
 function renderDisease(parts, ingredients, meta){
@@ -389,18 +426,29 @@ function renderDisease(parts, ingredients, meta){
     addBadge(db, `${label}: ${val.toFixed(1)}/10`, level);
   }
 
-  // detailed list
   dl.innerHTML = rows.map(([l,v])=>`<div class="kv"><div class="k">${l}</div><div>${v.toFixed(1)} / 10</div></div>`).join('');
 }
 
-/***** Events *****/
+/***** Diagnostics *****/
+async function runDiagnostics(){
+  const parts=[];
+  parts.push('Secure Context: '+(isSecureContext?'yes':'NO (need HTTPS)'));
+  parts.push('mediaDevices: '+(navigator.mediaDevices?'ok':'missing'));
+  try{
+    const list = await navigator.mediaDevices.enumerateDevices();
+    const vids = list.filter(d=>d.kind==='videoinput');
+    parts.push('Video Inputs: '+vids.length);
+    parts.push('Labels: '+vids.map(v=>v.label||'(no label until allowed)').join(' | '));
+  }catch(e){ parts.push('enumerateDevices failed: '+e.name); }
+  $('camStatus').textContent = parts.join(' • ');
+}
+
+/***** UI events *****/
 $('scanBtn').onclick = ()=>{ stopScan(); startScan(); };
 $('switchBtn').onclick = switchCamera;
 $('torchBtn').onclick = toggleTorch;
-$('lookupBtn').onclick = ()=>{
-  const code=$('barcodeInput').value.trim(); if (code) lookupByBarcode(code);
-};
-
+$('lookupBtn').onclick = ()=>{ const code=$('barcodeInput').value.trim(); if (code) lookupByBarcode(code); };
+$('diagBtn').onclick = runDiagnostics;
 </script>
 </body>
 </html>
