@@ -52,6 +52,7 @@
   .toggleBtn{border:1px dashed #3a4152;background:#0f1422;color:var(--ink);padding:10px 12px;border-radius:12px;cursor:pointer;width:max-content}
   canvas{max-width:560px}
   .macroList{display:grid;gap:6px}
+.log{white-space:pre-wrap;background:#0d1320;border:1px dashed #374058;border-radius:10px;padding:8px;color:#b8c7e0;max-height:160px;overflow:auto}
 </style>
 </head>
 <body>
@@ -77,10 +78,11 @@
       <div class="kv">
         <button id="torchBtn" class="btn btn-subtle">🔦 Torch</button>
         <button id="switchBtn" class="btn btn-subtle">🔁 Switch Camera</button>
-        <button id=\"diagBtn\" class=\"btn btn-subtle\">🧪 Diagnostics</button>
-        <button id=\"forceZXingBtn\" class=\"btn btn-subtle\">🧩 Force ZXing</button>
+        <button id="diagBtn" class="btn btn-subtle">🧪 Diagnostics</button>
+        <button id="forceZXingBtn" class="btn btn-subtle">🧩 Force ZXing</button>
         <span id="camStatus" class="status"></span>
       </div>
+      <div id="errLog" class="log" style="display:none"></div>
     </section>
 
     <section class="card row">
@@ -115,6 +117,10 @@
 <script src="https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/umd/index.min.js"></script>
 <script>
 /***** Utilities *****/
+// helpers injected
+function setStatus(msg){ const el=document.getElementById('camStatus'); if(el) el.textContent=msg; }
+(function(){ const log=document.getElementById('errLog'); function show(m){ if(!log)return; log.style.display='block'; log.textContent+=(log.textContent?'
+':'')+m; } window.addEventListener('error',e=>show('JS Error: '+e.message)); window.addEventListener('unhandledrejection',e=>show('Promise: '+(e.reason&&e.reason.message||e.reason))); })();
 const $ = (id)=>document.getElementById(id);
 const fmtPct = (x)=> (x*100).toFixed(0)+'%';
 const clamp=(x,a=0,b=1)=>Math.max(a,Math.min(b,x));
